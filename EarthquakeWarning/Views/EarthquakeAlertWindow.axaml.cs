@@ -25,10 +25,24 @@ public partial class EarthquakeAlertWindow : Window
         InitializeComponent();
         WaveMap.LegendChanged += text => MapLegend.Text = text;
         DataContext = Model;
+        SizeChanged += (_, _) => FitCanvas();
         _timer.Tick += (_, _) => Refresh();
-        Opened += (_, _) => { Refresh(); _timer.Start(); };
+        Opened += (_, _) => { FitCanvas(); Refresh(); _timer.Start(); };
         Closed += (_, _) => _timer.Stop();
-        KeyDown += (_, args) => { if (args.Key == Key.Escape) { args.Handled = true; Close(); } };
+        KeyDown += (_, args) =>
+        {
+            if (args.Key == Key.Escape) { args.Handled = true; Close(); }
+            else if (args.Key == Key.M) { args.Handled = true; MuteClick(this, new()); }
+            else if (args.Key == Key.D) { args.Handled = true; Model.ShowEvidence = !Model.ShowEvidence; }
+        };
+    }
+
+    private void FitCanvas()
+    {
+        if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
+        var scale = Math.Min(ClientSize.Width / 1600, ClientSize.Height / 900);
+        DesignCanvas.Width = ClientSize.Width / scale;
+        DesignCanvas.Height = ClientSize.Height / scale;
     }
 
     public void ShowOnClassIslandScreen()

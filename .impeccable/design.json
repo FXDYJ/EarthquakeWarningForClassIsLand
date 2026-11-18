@@ -1,40 +1,75 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-18T22:25:39+08:00",
+  "generatedAt": "2026-11-19T05:41:45+08:00",
   "title": "Design System: EarthquakeWarning for ClassIsland",
   "extensions": {
     "colorMeta": {
-      "weak-accent": { "role": "primary", "displayName": "微弱震感蓝" },
-      "felt-accent": { "role": "primary", "displayName": "有感琥珀" },
-      "damaging-accent": { "role": "primary", "displayName": "强烈警戒红" },
-      "background": { "role": "neutral", "displayName": "近黑工作区" }
+      "weak-accent": {
+        "role": "primary",
+        "displayName": "微弱震感蓝"
+      },
+      "felt-accent": {
+        "role": "primary",
+        "displayName": "有感琥珀"
+      },
+      "damaging-accent": {
+        "role": "primary",
+        "displayName": "强烈警戒红"
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "近黑工作区"
+      }
     },
     "typographyMeta": {
-      "display": { "displayName": "预计到达时间", "purpose": "Avalonia 固定画布内的大号秒数、到达或破折号；随 Viewbox 均匀缩放。" },
-      "caption": { "displayName": "辅助说明", "purpose": "时间、单位、估算说明与参数标签。" }
+      "display": {
+        "displayName": "预计到达时间",
+        "purpose": "Avalonia 自适应画布内的大号预计秒数或破折号；到达文字使用 display-arrived，随 Viewbox 均匀缩放。"
+      },
+      "caption": {
+        "displayName": "辅助说明",
+        "purpose": "时间、单位、估算说明与参数标签。"
+      }
+    },
+    "nativePlatform": {
+      "name": "Windows / Avalonia",
+      "source": "EarthquakeWarning/Views/EarthquakeAlertWindow.axaml",
+      "designCanvas": "1600x900; FitCanvas expands the extra dimension",
+      "layout": "342 / flexible map / 282; rows 88 / flexible / 136 / 34",
+      "components": "Native Button and ToggleButton; no HTML/CSS runtime or fabricated web samples",
+      "review": "13 headless rendered states; physical classroom and multi-monitor behavior not verified"
     }
   },
   "components": [],
   "narrative": {
-    "overview": "原生 Avalonia 预警工作区，延续已确认的科技感、强烈警戒感和高信息密度。深色背景承载大号到达时间，震中、本地烈度、避险提示和接口证据共同解释当前预警。界面颜色随本地预估烈度切换，不能将所有事件都画成红色警报。\n\n设置页沿用 ClassIsland / FluentAvalonia 的主题和原生设置控件；全屏警报使用本文件提取的专用配色与字号。这里记录当前实现，不声称已完成截图、真实设备或音频听感验证。",
+    "northStar": "教室避险优先的地震预警中心看板",
+    "overview": "原生 Avalonia 三列工作区：左侧优先给教室用户读取本地影响和预计到达时间，中央保留独立大地图，右侧常显接收证据，底部持续给出行动。科技感来自地图密度、稳定分区和信息层级；强烈警戒感由状态颜色与明确动作产生，不依赖闪烁或装饰仪表。\n\n设置页沿用 ClassIsland / FluentAvalonia 的主题和原生设置控件。全屏使用专用深色表面、直线面板和三档警戒色；当预测不可用时，状态文字和参考位置替代貌似有效的预测数字与波圈。此文档记录已批准实现，原生无头渲染不能证明真实教室阅读、多屏投放或真实地震表现。",
     "keyCharacteristics": [
-      "到达时间和本地预估烈度具有最高信息权重。",
+      "本地到达时间、预估烈度与底部防护动作具有最高信息权重。",
+      "中央地图独立伸展，接收证据常显，图例和操作不遮住地图。",
       "蓝、琥珀、红三档颜色与无滴、单滴、双滴声音保持对应。",
-      "单源待核验、参数分歧、撤销、演练都有明确文字。",
+      "待核验、分歧、过期、模型不支持、撤销与演练有明确身份和状态文字。",
       "地图和接口证据是解释信息，传播波前明确标为估算示意。"
     ],
     "rules": [
-      { "name": "The Estimated Impact Rule", "body": "严重度颜色由本地预估烈度决定，不能按震级直接套用红色主题。", "section": "colors" }
+      {
+        "name": "The Estimated Impact Rule",
+        "body": "严重度颜色由本地预估烈度决定，不能按震级直接套用红色主题。",
+        "section": "colors"
+      }
     ],
     "dos": [
       "Do 在到达时间、本地烈度和波前附近保留估算含义与当前状态文字。",
-      "Do 保留静音、关闭、Esc、地图复位和证据滚动等现有操作。",
+      "Do 保持中央地图和右侧接收证据独立可见，图例与操作放在地图外。",
+      "Do 保留 D 详情、M 静音、Esc 关闭、地图复位和证据滚动等现有操作。",
+      "Do 在暂停预测时移除有效数字和波圈，在预计到达后继续给出防护动作。",
       "Do 将宿主设置主题与全屏专用样式分开记录。"
     ],
     "donts": [
       "Don't 把同一网关的不同数据流或 HTTP/推送计算成两个独立确认接口。",
-      "Don't 将估算波前、三档烈度名称或在线瓦片标签描述为台站实测或确定结果。",
-      "Don't 添加快速闪烁、伪装饰读数，或声称此文档已证明截图与真实播放效果。"
+      "Don't 将估算波前、三档影响名称或在线瓦片标签描述为台站实测或确定结果。",
+      "Don't 添加快速闪烁、虚构台站、可信度百分比、伪装饰读数或预测结束时间。",
+      "Don't 将原生无头截图与回归结果描述为真实教室、真实多屏或真实地震验收。"
     ]
   }
 }
