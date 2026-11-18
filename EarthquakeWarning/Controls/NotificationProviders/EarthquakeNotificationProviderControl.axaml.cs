@@ -12,7 +12,8 @@ public partial class EarthquakeNotificationProviderControl : UserControl, INotif
     private double Latitude { get; set; }
     private double Longitude { get; set; }
     public EarthquakeInfo EarthquakeInfo { get; set; }
-    public string PlaceName { get; set; }
+    public string PlaceName { get; set; } = string.Empty;
+    public int Distance { get; set; }
     public int Updates { get; set; }
     public double Magnitude { get; set; }
 
@@ -20,8 +21,10 @@ public partial class EarthquakeNotificationProviderControl : UserControl, INotif
     {
         get
         {
-            double distance = HuaniaEarthQuakeCalculator.GetDistance(Latitude, Longitude, EarthquakeInfo.Data.Latitude, EarthquakeInfo.Data.Longitude);
-            return HuaniaEarthQuakeCalculator.GetIntensity(EarthquakeInfo.Data.Magnitude, distance).ToString("F1");
+            double distance = HuaniaEarthQuakeCalculator.GetDistance(Latitude, Longitude, EarthquakeInfo.Latitude, EarthquakeInfo.Longitude);
+            return HuaniaEarthQuakeCalculator
+                .GetIntensity(EarthquakeInfo.Magnitude, distance, EarthquakeInfo.Depth, EarthquakeInfo.Longitude)
+                .ToString("F1");
         }
     }
 
@@ -30,9 +33,10 @@ public partial class EarthquakeNotificationProviderControl : UserControl, INotif
     {
         get 
         {
-            double distance = HuaniaEarthQuakeCalculator.GetDistance(Latitude, Longitude, EarthquakeInfo.Data.Latitude, EarthquakeInfo.Data.Longitude);
-            double expectTime = HuaniaEarthQuakeCalculator.GetCountDownSeconds(EarthquakeInfo.Data.Depth??10.0, distance);
-            DateTime pWaveArriveTime = DateTime.Parse(EarthquakeInfo.Data.ShockTime).AddSeconds(expectTime);
+            double distance = HuaniaEarthQuakeCalculator.GetDistance(Latitude, Longitude, EarthquakeInfo.Latitude, EarthquakeInfo.Longitude);
+            double depth = EarthquakeInfo.Depth is > 0 ? EarthquakeInfo.Depth.Value : 10.0;
+            double expectTime = HuaniaEarthQuakeCalculator.GetCountDownSeconds(depth, distance);
+            DateTime pWaveArriveTime = EarthquakeTime.Parse(EarthquakeInfo.ShockTime).AddSeconds(expectTime);
             TimeSpan timeDifference = pWaveArriveTime - DateTime.Now;
             return timeDifference;
         }
@@ -52,20 +56,24 @@ public partial class EarthquakeNotificationProviderControl : UserControl, INotif
         };
         timer.Tick += (s, e) =>
         {
-            PlaceName = earthquakeInfo.Data.PlaceName;
-            Updates = earthquakeInfo.Data.Updates;
-            Magnitude = earthquakeInfo.Data.Magnitude;
+            PlaceName = earthquakeInfo.PlaceName;
+            Updates = earthquakeInfo.Updates;
+            Distance = (int)Math.Round(HuaniaEarthQuakeCalculator.GetDistance(Latitude, Longitude, earthquakeInfo.Latitude, earthquakeInfo.Longitude));
+            Magnitude = earthquakeInfo.Magnitude;
 
             OnPropertyChanged(nameof(PlaceName));
             OnPropertyChanged(nameof(Updates));
+            OnPropertyChanged(nameof(Distance));
             OnPropertyChanged(nameof(Magnitude));
             OnPropertyChanged(nameof(Time));
             OnPropertyChanged(nameof(LocalIntensity));
         };
         timer.Start();
+        // 提醒关闭后控件会离开可视化树，必须停止计时器，否则会一直持有控件造成泄漏。
+        DetachedFromVisualTree += (_, _) => timer.Stop();
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
+    public new event PropertyChangedEventHandler? PropertyChanged;
     protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
