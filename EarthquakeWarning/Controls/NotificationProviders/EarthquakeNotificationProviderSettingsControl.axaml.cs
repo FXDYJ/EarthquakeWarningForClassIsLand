@@ -25,6 +25,7 @@ public partial class EarthquakeNotificationProviderSettingsControl : Notificatio
         {
             using var speech = new SpeechSynthesizer();
             return new[] { "自动选择" }.Concat(speech.GetInstalledVoices().Where(voice => voice.Enabled
+                && voice.VoiceInfo.Gender == VoiceGender.Female
                 && voice.VoiceInfo.Culture.TwoLetterISOLanguageName == "zh").Select(voice => voice.VoiceInfo.Name)).ToArray();
         }
         catch (Exception error) { Debug.WriteLine(error); return new[] { "自动选择" }; }

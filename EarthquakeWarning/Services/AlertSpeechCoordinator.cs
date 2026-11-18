@@ -56,10 +56,11 @@ public sealed class AlertSpeechCoordinator : IDisposable
         using var information = new SpeechSynthesizer();
         using var countdown = new SpeechSynthesizer();
         var voices = information.GetInstalledVoices().Where(voice => voice.Enabled
+            && voice.VoiceInfo.Gender == VoiceGender.Female
             && voice.VoiceInfo.Culture.TwoLetterISOLanguageName == "zh").Select(voice => voice.VoiceInfo.Name).ToArray();
         if (voices.Length == 0)
         {
-            StatusChanged?.Invoke("系统未安装中文音色，使用随插件提供的离线提示和报数");
+            StatusChanged?.Invoke("系统未安装中文女声音色，使用内置女声提示和报数");
             await RunRecordedOnlyAsync(current, token);
             return;
         }
