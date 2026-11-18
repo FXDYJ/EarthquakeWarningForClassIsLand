@@ -1,347 +1,350 @@
-﻿using Avalonia.Media;
+using Avalonia.Controls;
+using Avalonia.Media;
 using Avalonia.Threading;
 using ClassIsland.Core.Abstractions.Services.NotificationProviders;
-using ClassIsland.Core.Abstractions.Services.SpeechService;
 using ClassIsland.Core.Attributes;
 using ClassIsland.Core.Models.Notification;
-using ClassIsland.Shared;
 using EarthquakeWarning.Calculators;
-using EarthquakeWarning.Controls.NotificationProviders;
-using EarthquakeWarning.Converters;
 using EarthquakeWarning.Models;
-using EarthquakeWarning.Services;
+using EarthquakeWarning.Services.Feeds;
+using EarthquakeWarning.Views;
+using Microsoft.Extensions.Hosting;
 using System.Diagnostics;
-using System.Globalization;
-using System.Text.Json;
-using System.Net.Http;
 
 namespace EarthquakeWarning.Services.NotificationProviders;
 
-[NotificationProviderInfo("B27C0AF3-C917-44DE-A61D-8010C3F3FB92", "地震预警", "\uEF5C", "在地震发生时，根据用户设置发出地震预警")]
-public class EarthquakeNotificationProvider : NotificationProviderBase<EarthquakeNotificationSettings>
+[NotificationProviderInfo("B27C0AF3-C917-44DE-A61D-8010C3F3FB92", "地震预警", "\uEF5C", "多接口核验地震预警与全屏震情")]
+public class EarthquakeNotificationProvider : NotificationProviderBase<EarthquakeNotificationSettings>, IDisposable
 {
-    private const int PollIntervalMs = 1000;
-    private const int ReconnectDelayMs = 5000;
-    private const int SpeechCountdownStartSeconds = 10;
-    private const int EarlySpeechStepSeconds = 2;
-    private static readonly TimeSpan SpeechPollInterval = TimeSpan.FromMilliseconds(100);
-    private static readonly Uri MiuiUri = new("https://srv.sec.miui.com/earthquake/warning/records");
-    private static readonly HttpClient HttpClient = new()
-    {
-        Timeout = TimeSpan.FromSeconds(10),
-    };
+    private readonly CancellationTokenSource _shutdown = new();
+    private readonly SeismicSourceService _feeds = new();
+    private readonly AlertSpeechCoordinator _speech = new();
+    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly Dictionary<string, DateTimeOffset> _shown = new();
+    private readonly HashSet<string> _actions = new();
+    private readonly Dictionary<string, string> _pending = new();
+    private readonly HashSet<string> _dismissed = new();
+    private readonly HashSet<string> _presented = new();
+    private readonly HashSet<string> _muted = new();
+    private readonly IDisposable _stopRegistration;
+    private Task _monitor = Task.CompletedTask;
+    private volatile string _mode = "combined";
+    private volatile bool _enabled = true;
+    private AlertSnapshot? _active;
+    private EarthquakeAlertWindow? _window;
+    private ConsensusEngine? _drill;
+    private DateTimeOffset _drillStart;
+    private SeismicReport? _drillReport;
+    private string? _speechEvent;
+    private DateTimeOffset _lastHealth;
+    private int _disposed;
+    public static EarthquakeNotificationProvider? Current { get; private set; }
 
-    public EarthquakeNotificationProvider()
+    public EarthquakeNotificationProvider(IHostApplicationLifetime lifetime)
     {
-        Task.Run(EewMonitor);
-        Task.Run(DataMonitor);
+        Current = this;
+        _stopRegistration = lifetime.ApplicationStopping.Register(Dispose);
+        _speech.StatusChanged += SpeechStatusChanged;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_shutdown.IsCancellationRequested) return;
+            _mode = NormalizeMode(Settings.SourceMode);
+            _enabled = Settings.MonitoringEnabled;
+            _timer.Tick += Tick;
+            _timer.Start();
+            _monitor = Task.Run(MonitorSelectionAsync);
+        });
     }
 
-    private volatile bool _showing = false;
-    private string? _lastMiuiKey;
-    private string? _lastActionEventId;
-    private string? _lastSpeechEventId;
-    private string? _lastShownEventId;
-    private CancellationTokenSource _countdownSpeechCts = new();
-
-    private async Task DataMonitor()
-    {
-        while (true)
-        {
-            try
-            {
-                await Task.Delay(500);
-                var obj = Settings.EarthquakeInfo;
-                if (string.IsNullOrWhiteSpace(obj.Id)) continue;
-                double distance = HuaniaEarthQuakeCalculator.GetDistance(Settings.Latitude, Settings.Longitude, obj.Latitude, obj.Longitude);
-                double localIntensity = HuaniaEarthQuakeCalculator.GetIntensity(obj.Magnitude, distance, obj.Depth, obj.Longitude);
-                // 深度缺失或为 0 时按 10 km 处理，与烈度估算保持一致。
-                double depthKm = obj.Depth is > 0 ? obj.Depth.Value : 10.0;
-                var depthText = obj.Depth is > 0 ? $"{depthKm:F0}km" : "未知";
-                var info = $"在{obj.ShockTime}时，{obj.PlaceName}({obj.Latitude} {obj.Longitude})发生{obj.Magnitude}级地震，震源深度{depthText}。震中距{distance:F0}km，本地烈度{localIntensity:F1}。";
-                // 设置项绑定在 UI 线程，避免后台线程直接触发属性变更。
-                Dispatcher.UIThread.Post(() => Settings.Info = info);
-
-                var speechShouldTrigger = Settings.IsSpeechEnabled && localIntensity > Settings.SpeechThreshold;
-                var notificationShouldTrigger = localIntensity > Settings.Threshold;
-                if (!speechShouldTrigger && !notificationShouldTrigger)
-                {
-                    continue;
-                }
-
-                double expectTime = HuaniaEarthQuakeCalculator.GetCountDownSeconds(depthKm, distance);
-                DateTime pWaveArriveTime = EarthquakeTime.Parse(obj.ShockTime).AddSeconds(expectTime);
-                if (DateTime.Now >= pWaveArriveTime)
-                {
-                    continue;
-                }
-
-                // 语音播报使用独立的开关和阈值，与通知阈值互不影响。
-                if (speechShouldTrigger
-                    && !string.IsNullOrWhiteSpace(obj.EventId) && obj.EventId != _lastSpeechEventId)
-                {
-                    _lastSpeechEventId = obj.EventId;
-                    StartCountdownSpeech(pWaveArriveTime);
-                }
-
-                if (!notificationShouldTrigger)
-                {
-                    continue;
-                }
-
-                // MIUI eventId is stable across all updates of the same earthquake.
-                if (!string.IsNullOrWhiteSpace(obj.EventId) && obj.EventId != _lastActionEventId)
-                {
-                    if (Settings.IsDrillMode)
-                    {
-                        // 不把演练事件记入去重状态，避免演练结束后对真实事件重复执行动作。
-                        SetActionStatus("预警演练中，未执行预警动作");
-                    }
-                    else
-                    {
-                        _lastActionEventId = obj.EventId;
-                        _ = ExecuteConfiguredActionsAsync();
-                    }
-                }
-
-                if (_showing)
-                {
-                    continue;
-                }
-
-                // 同一地震只弹一次提醒，后续更新通过共享的 EarthquakeInfo 实时反映。
-                var eventKey = string.IsNullOrWhiteSpace(obj.EventId) ? obj.Id : obj.EventId;
-                if (eventKey == _lastShownEventId)
-                {
-                    continue;
-                }
-
-                _showing = true;
-                _lastShownEventId = eventKey;
-                // 不阻塞监测循环：提醒显示期间仍需继续处理地震更新。
-                _ = ShowNotificationSafeAsync(pWaveArriveTime, localIntensity);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("DataMonitor 错误: " + ex.Message);
-            }
-        }
-    }
-
-    private async Task ExecuteConfiguredActionsAsync()
-    {
-        var errors = new List<string>();
-        var executedActions = new List<string>();
-        SetActionStatus("正在执行预警动作...");
-
-        if (Settings.IsCommandEnabled)
-        {
-            try
-            {
-                EarthquakeActionExecutor.ExecuteCommand(Settings.Command);
-                executedActions.Add("CMD 命令");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"执行地震预警 CMD 命令失败: {ex}");
-                errors.Add($"CMD：{ex.Message}");
-            }
-        }
-
-        if (errors.Count > 0)
-        {
-            SetActionStatus(string.Join("；", errors));
-        }
-        else if (executedActions.Count > 0)
-        {
-            SetActionStatus($"已执行：{string.Join("、", executedActions)}");
-        }
-        else
-        {
-            SetActionStatus("未启用 CMD 命令");
-        }
-    }
-
-    private void StartCountdownSpeech(DateTime arriveTime)
-    {
-        _countdownSpeechCts.Cancel();
-        _countdownSpeechCts = new CancellationTokenSource();
-        _ = SpeakCountdownAsync(arriveTime, _countdownSpeechCts.Token);
-    }
-
-    private static async Task SpeakCountdownAsync(DateTime arriveTime, CancellationToken cancellationToken)
-    {
-        IDisposable? volumeBoost = null;
-        var boostAttempted = false;
-        var countdownStarted = false;
-        var lastSpoken = int.MaxValue;
-
-        try
-        {
-            ISpeechService? speechService = null;
-
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var exactRemaining = (arriveTime - DateTime.Now).TotalSeconds;
-                var remaining = (int)Math.Ceiling(exactRemaining);
-                if (remaining <= 0)
-                {
-                    break;
-                }
-
-                // 预警一开始就提高系统音量，并在整个倒计时期间保持，结束后恢复。
-                if (!boostAttempted)
-                {
-                    boostAttempted = true;
-                    volumeBoost = SystemVolumeBoost.Acquire();
-                }
-
-                var inFinalCountdown = remaining <= SpeechCountdownStartSeconds;
-
-                // 最后 10 秒逐秒播报；在此之前每 2 秒播报一次。
-                var shouldSpeak = inFinalCountdown
-                    ? remaining != lastSpoken
-                    : remaining % EarlySpeechStepSeconds == 0 && remaining != lastSpoken;
-                if (shouldSpeak)
-                {
-                    if (!countdownStarted)
-                    {
-                        countdownStarted = true;
-                        // 播报期间让 ClassIsland 的语音队列让路，避免与倒计时重叠。
-                        speechService = IAppHost.TryGetService<ISpeechService>();
-                        speechService?.ClearSpeechQueue();
-                    }
-
-                    var text = remaining.ToString(CultureInfo.InvariantCulture);
-                    // 优先使用本地语音，避免在线语音服务的延迟；不可用时退回 ClassIsland 语音服务。
-                    if (!LocalSpeech.TrySpeak(text))
-                    {
-                        speechService ??= IAppHost.TryGetService<ISpeechService>();
-                        speechService?.EnqueueSpeechQueue(text);
-                    }
-
-                    lastSpoken = remaining;
-                }
-
-                TimeSpan delay;
-                if (inFinalCountdown)
-                {
-                    delay = SpeechPollInterval;
-                }
-                else
-                {
-                    // 最多休眠 1 秒，保证能踩到每个偶数秒；临近倒数时精确等待到 10 秒整。
-                    delay = TimeSpan.FromSeconds(Math.Clamp(exactRemaining - SpeechCountdownStartSeconds, 0.05, 1));
-                }
-
-                await Task.Delay(delay, cancellationToken);
-            }
-
-            if (volumeBoost is not null)
-            {
-                // 留出最后一个数字的播放时间。
-                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"倒计时语音播报失败: {ex.Message}");
-        }
-        finally
-        {
-            volumeBoost?.Dispose();
-        }
-    }
-
-    private void SetActionStatus(string status)
-    {
-        Dispatcher.UIThread.Post(() => Settings.ActionStatus = status);
-    }
-
-    private async Task ShowNotificationSafeAsync(DateTime arriveTime, double localIntensity)
+    private async Task MonitorSelectionAsync()
     {
         try
         {
-            var expectTime = (arriveTime - DateTime.Now).TotalSeconds;
-            await Dispatcher.UIThread.InvokeAsync(async () => await ShowNotificationAsync(expectTime, localIntensity));
+            while (!_shutdown.IsCancellationRequested)
+            {
+                if (!_enabled) { await Task.Delay(250, _shutdown.Token); continue; }
+                var mode = _mode;
+                using var source = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+                var run = _feeds.RunAsync(mode, source.Token);
+                try
+                {
+                    while (!_shutdown.IsCancellationRequested && _enabled && _mode == mode && !run.IsCompleted)
+                        await Task.Delay(250, _shutdown.Token);
+                }
+                finally
+                {
+                    source.Cancel();
+                    try { await run; }
+                    catch (OperationCanceledException) when (source.IsCancellationRequested) { }
+                }
+            }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { }
+        catch (Exception error)
         {
-            Debug.WriteLine($"显示地震预警失败: {ex}");
-        }
-        finally
-        {
-            _showing = false;
+            Debug.WriteLine(error);
+            Dispatcher.UIThread.Post(() => Settings.ServerInfo = $"监测停止：{error.Message}");
         }
     }
 
-    private async Task ShowNotificationAsync(double expectTime, double localIntensity)
+    private void Tick(object? sender, EventArgs args)
     {
-        var mask = NotificationContent.CreateTwoIconsMask("地震预警", "\uEF5D", "\uED35");
-        mask.Duration = TimeSpan.FromSeconds(3);
-        mask.Color = new SolidColorBrush(IntensityToColorConverter.GetColor(localIntensity));
-        var notice = new NotificationRequest
+        try { Evaluate(); }
+        catch (Exception error) { Debug.WriteLine(error); Settings.ServerInfo = $"预警处理异常：{error.Message}"; }
+    }
+
+    private void Evaluate()
+    {
+        var mode = NormalizeMode(Settings.SourceMode);
+        if (_mode != mode || _enabled != Settings.MonitoringEnabled)
+        {
+            _mode = mode;
+            _enabled = Settings.MonitoringEnabled;
+            CloseActive();
+            if (!_enabled) StopDrill();
+        }
+        if (!_enabled) { Settings.ServerInfo = "地震监测已暂停"; return; }
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastHealth > TimeSpan.FromSeconds(1))
+        {
+            _lastHealth = now;
+            var health = _feeds.Health;
+            Settings.ServerInfo = $"{health.Count(item => item.Available)}/{health.Count} 个连接可用 · {now.ToLocalTime():HH:mm:ss}";
+            Settings.SourceStatus = string.Join("\n", health.Select(item => $"{item.Name}：{item.Status} · 最近成功 {item.LastSuccess?.ToLocalTime().ToString("HH:mm:ss") ?? "尚无"}"));
+            var recent = _feeds.LatestReports;
+            Settings.RecentReports = string.Join("\n\n", recent.Take(8).Select(item =>
+                $"{item.Gateway} / {item.Feed} · {(item.Kind == ReportKind.EarlyWarning ? "预警记录" : "震后信息")}\n{item.OriginTime.ToLocalTime():MM-dd HH:mm:ss} {item.PlaceName} M{item.Magnitude:F1}\n北纬 {item.Latitude:F3}°，东经 {item.Longitude:F3}°，深度 {(item.Depth is > 0 ? $"{item.Depth:F0} km" : "未知")} · 第 {item.ReportNumber?.ToString() ?? "—"} 报"));
+            if (_active is null && recent.FirstOrDefault() is { } latest)
+                Settings.Info = $"最近记录：{latest.OriginTime.ToLocalTime():MM-dd HH:mm:ss} {latest.PlaceName} M{latest.Magnitude:F1}（{latest.Feed}）";
+        }
+        if (!ValidLocation(Settings.Latitude, Settings.Longitude))
+        {
+            Settings.Info = "请先设置本地经纬度，或使用自动定位。";
+            CloseActive();
+            return;
+        }
+        foreach (var key in _shown.Where(item => now - item.Value > TimeSpan.FromMinutes(6)).Select(item => item.Key).ToArray())
+        { _shown.Remove(key); _dismissed.Remove(key); _pending.Remove(key); _actions.Remove(key); _presented.Remove(key); _muted.Remove(key); }
+        var snapshots = _feeds.Engine.GetEvents(now, mode)
+            .Select(item => new AlertSnapshot(item, Settings.Latitude, Settings.Longitude)).ToList();
+        if (_drill is not null && snapshots.Any(item => item.Event.Confirmed && IsRelevant(item) && item.Remaining > -30)) StopDrill();
+        if (_drill is not null && _drillReport is not null)
+        {
+            if (now - _drillStart > TimeSpan.FromSeconds(2))
+                _drill.Add(_drillReport with { Gateway = "演练接口 B", Feed = "drill-b", Magnitude = _drillReport.Magnitude + 0.1 }, now);
+            snapshots.AddRange(_drill.GetEvents(now, "combined").Select(item => new AlertSnapshot(item, Settings.Latitude, Settings.Longitude, true)));
+        }
+        foreach (var snapshot in snapshots.Where(item => IsRelevant(item) && item.Remaining > 0
+                     && item.Event.Reports.Any(report => report.Kind == ReportKind.EarlyWarning)))
+        {
+            UpdateLegacyInfo(snapshot);
+            if (!snapshot.Event.Confirmed)
+            {
+                var state = snapshot.Event.Verification;
+                if (!_pending.TryGetValue(snapshot.EventKey, out var previous) || previous != state)
+                {
+                    _pending[snapshot.EventKey] = state;
+                    _shown.TryAdd(snapshot.EventKey, now);
+                    ShowCompact(snapshot, state);
+                }
+                continue;
+            }
+            if (!snapshot.Drill && snapshot.LocalIntensity > Settings.Threshold && _actions.Add(snapshot.EventKey)) _ = ExecuteActionAsync();
+        }
+        var selected = snapshots.Where(item => item.Event.Confirmed && IsRelevant(item) && item.Remaining > -30
+                && !_dismissed.Contains(item.EventKey) && (item.Remaining > 0 || _shown.ContainsKey(item.EventKey)))
+            .OrderBy(item => item.Drill).ThenByDescending(item => item.LocalIntensity).FirstOrDefault();
+        if (_active is not null)
+        {
+            var current = snapshots.FirstOrDefault(item => item.EventKey == _active.EventKey);
+            if (current?.Event.Cancelled == true) { ShowCompact(current, "预警已撤销"); CloseActive(); }
+            else if (current?.Event.HasConflict == true && selected is null && current.Remaining > -30)
+            {
+                Volatile.Write(ref _active, current);
+                _speech.Stop();
+                _speechEvent = null;
+                Settings.SpeechStatus = "参数存在分歧，语音已暂停";
+                if (_window is not null) _window.Model.VoiceStatus = Settings.SpeechStatus;
+                return;
+            }
+        }
+        if (selected is null)
+        {
+            if (_active?.Drill == true) StopDrill();
+            CloseActive();
+            return;
+        }
+        var changed = _active?.EventKey != selected.EventKey;
+        if (changed) { _speech.Stop(); _speechEvent = null; }
+        Volatile.Write(ref _active, selected);
+        UpdateLegacyInfo(selected);
+        _shown.TryAdd(selected.EventKey, now);
+        if (_window is not null && (!Settings.EnableFullScreen || (!selected.Drill && selected.LocalIntensity <= Settings.Threshold))) CloseWindow();
+        if (selected.Drill || selected.LocalIntensity > Settings.Threshold)
+        {
+            if (Settings.EnableFullScreen && _window is null)
+            {
+                _window = new EarthquakeAlertWindow(() => Volatile.Read(ref _active), Mute, Settings);
+                _window.Model.VoiceStatus = Settings.SpeechStatus;
+                _window.Closed += WindowClosed;
+                _window.ShowOnClassIslandScreen();
+            }
+            else if (!Settings.EnableFullScreen && _presented.Add(selected.EventKey)) ShowCompact(selected, selected.Event.Verification);
+        }
+        if (_window is not null) _window.Model.MuteLabel = _muted.Contains(selected.EventKey) ? "已静音" : "静音";
+        if (Settings.IsSpeechEnabled && (selected.Drill || selected.LocalIntensity > Settings.SpeechThreshold)
+            && _speechEvent != selected.EventKey && !_muted.Contains(selected.EventKey))
+        {
+            _speechEvent = selected.EventKey;
+            _speech.Start(() => Volatile.Read(ref _active), Settings);
+        }
+        if (!Settings.IsSpeechEnabled) { _speech.Stop(); _speechEvent = null; }
+        if (selected.Drill && selected.Remaining < -15) StopDrill();
+    }
+
+    private bool IsRelevant(AlertSnapshot item) => item.Drill || item.LocalIntensity > Settings.Threshold
+        || (Settings.IsSpeechEnabled && item.LocalIntensity > Settings.SpeechThreshold);
+
+    private void UpdateLegacyInfo(AlertSnapshot snapshot)
+    {
+        var report = snapshot.Report;
+        Settings.Info = $"{snapshot.Event.Verification} · {report.PlaceName} M{report.Magnitude:F1} · 本地预估烈度 {snapshot.LocalIntensity:F1} · 震中距 {snapshot.Distance:F0} km";
+        Settings.EarthquakeInfo.UpdateFrom(new EarthquakeInfo
+        {
+            Id = snapshot.EventKey, EventId = report.EventId, Latitude = report.Latitude, Longitude = report.Longitude,
+            Magnitude = report.Magnitude, Depth = report.Depth, PlaceName = report.PlaceName,
+            ShockTime = EarthquakeTime.Format(report.OriginTime.LocalDateTime), UpdateTime = EarthquakeTime.Format(report.ReportTime.LocalDateTime),
+            Updates = report.ReportNumber ?? 0, EpiIntensity = report.MaximumIntensity ?? 0
+        });
+    }
+
+    private void ShowCompact(AlertSnapshot snapshot, string state)
+    {
+        var mask = NotificationContent.CreateTwoIconsMask(snapshot.Drill ? "地震预警演练" : "地震信息", "\uEF5D", "\uED35");
+        mask.Duration = TimeSpan.FromSeconds(2);
+        mask.Color = new SolidColorBrush(Color.Parse(snapshot.Event.Confirmed ? snapshot.Severity.Header : "#B36A16"));
+        mask.IsSpeechEnabled = false;
+        var request = new NotificationRequest
         {
             MaskContent = mask,
-            OverlayContent = new NotificationContent()
+            OverlayContent = new NotificationContent
             {
-                Content = new EarthquakeNotificationProviderControl(Settings.EarthquakeInfo, Settings.Latitude, Settings.Longitude),
-                // 至少保留 1 秒，避免临近到达时出现负时长。
-                Duration = TimeSpan.FromSeconds(Math.Max(1.0, expectTime - 3.0)),
+                Content = new TextBlock { Text = $"{state}\n{snapshot.Report.PlaceName} M{snapshot.Report.Magnitude:F1} · 本地预估烈度 {snapshot.LocalIntensity:F1}",
+                    TextWrapping = TextWrapping.Wrap, FontSize = 22, Margin = new Avalonia.Thickness(18) },
+                Duration = TimeSpan.FromSeconds(6), IsSpeechEnabled = false
             }
-
         };
-        await ShowNotificationAsync(notice);
+        _ = ShowCompactSafeAsync(request);
     }
 
-    public async Task EewMonitor()
+    private async Task ShowCompactSafeAsync(NotificationRequest request)
     {
-        while (true)
+        try { await ShowNotificationAsync(request); }
+        catch (Exception error) { Settings.ServerInfo = $"CI 提醒失败：{error.Message}"; Debug.WriteLine(error); }
+    }
+
+    private async Task ExecuteActionAsync()
+    {
+        if (!Settings.IsCommandEnabled) return;
+        try
         {
-            try
-            {
-                using var content = new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    ["version"] = "2",
-                    ["sign"] = MiuiEarthquakeSigning.MakeSignature(new Dictionary<string, string>
-                    {
-                        ["version"] = "2",
-                    }),
-                });
-                using var response = await HttpClient.PostAsync(MiuiUri, content);
-                response.EnsureSuccessStatusCode();
-                var json = await response.Content.ReadAsStringAsync();
-                var result = JsonSerializer.Deserialize<MiuiEarthquakeResponse>(json);
-                if (result?.Code != 0)
-                {
-                    throw new InvalidOperationException($"MIUI API returned {result?.Code}: {result?.Description}");
-                }
-
-                var record = result.Data?.OrderByDescending(item => item.UpdateAt).FirstOrDefault();
-                if (record is not null && record.EventId != 0)
-                {
-                    var miuiKey = $"{record.EventId}:{record.Update}";
-                    if (miuiKey != _lastMiuiKey)
-                    {
-                        _lastMiuiKey = miuiKey;
-                        var info = record.ToEarthquakeInfo();
-                        Dispatcher.UIThread.Post(() => Settings.EarthquakeInfo.UpdateFrom(info));
-                    }
-
-                    var serverInfo = $"上一次数据更新：{EarthquakeTime.Format(DateTime.Now)}";
-                    Dispatcher.UIThread.Post(() => Settings.ServerInfo = serverInfo);
-                }
-
-                await Task.Delay(PollIntervalMs);
-            }
-            catch (Exception e)
-            {
-                Debug.WriteLine($"获取地震预警数据失败: {e.Message}，将在 {ReconnectDelayMs / 1000} 秒后重试。");
-                await Task.Delay(ReconnectDelayMs);
-            }
+            Settings.ActionStatus = "核验通过，正在执行 CMD 命令";
+            await EarthquakeActionExecutor.ExecuteCommandAsync(Settings.Command).ConfigureAwait(false);
+            if (!_shutdown.IsCancellationRequested) Dispatcher.UIThread.Post(() => Settings.ActionStatus = "核验通过，CMD 命令已完成");
         }
+        catch (Exception error)
+        {
+            if (!_shutdown.IsCancellationRequested) Dispatcher.UIThread.Post(() => Settings.ActionStatus = $"执行失败：{error.Message}");
+            Debug.WriteLine(error);
+        }
+    }
+
+    public void StartDrill()
+    {
+        StopDrill();
+        if (!ValidLocation(Settings.Latitude, Settings.Longitude)) { Settings.Info = "请先设置本地位置再开始演练"; return; }
+        var now = DateTimeOffset.UtcNow;
+        var latitude = Math.Clamp(Settings.Latitude + 0.7, -85, 85);
+        var longitude = (Settings.Longitude + 1.8 + 540) % 360 - 180;
+        var distance = ConsensusEngine.Distance(Settings.Latitude, Settings.Longitude, latitude, longitude);
+        var travel = HuaniaEarthQuakeCalculator.GetCountDownSeconds(12, distance);
+        var origin = now.AddSeconds(Math.Min(0, 35 - travel));
+        var targetIntensity = Settings.DrillProfile switch { "weak" => 1.8, "damaging" => 7.0, _ => 4.0 };
+        var baseline = HuaniaEarthQuakeCalculator.GetIntensity(5, distance, 12, longitude);
+        var slope = HuaniaEarthQuakeCalculator.GetIntensity(6, distance, 12, longitude) - baseline;
+        var magnitude = Math.Clamp(5 + (targetIntensity - baseline) / Math.Max(0.1, slope), 1, 9.5);
+        _drillReport = new SeismicReport("drill-a", "演练接口 A", "本地模拟数据", Guid.NewGuid().ToString("N"), 1,
+            origin, now, latitude, longitude, magnitude, 12, "附近地区（模拟震中）");
+        _drill = new ConsensusEngine();
+        _drill.Add(_drillReport, now);
+        _drillStart = now;
+        Settings.IsDrillMode = true;
+        Settings.ActionStatus = "演练中，外部命令已屏蔽";
+    }
+
+    public void StopDrill()
+    {
+        if (_active?.Drill == true) CloseActive();
+        _drill = null;
+        _drillReport = null;
+        Settings.IsDrillMode = false;
+    }
+
+    private void Mute()
+    {
+        if (_active is not null) _muted.Add(_active.EventKey);
+        _speech.Stop();
+        Settings.SpeechStatus = "本次预警已静音";
+    }
+
+    private void WindowClosed(object? sender, EventArgs args)
+    {
+        if (_active is not null) _dismissed.Add(_active.EventKey);
+        _window = null;
+        _speech.Stop();
+    }
+
+    private void CloseActive()
+    {
+        CloseWindow();
+        _speech.Stop();
+        _speechEvent = null;
+        Volatile.Write(ref _active, null);
+    }
+
+    private void CloseWindow()
+    {
+        if (_window is null) return;
+        _window.Closed -= WindowClosed;
+        _window.Close();
+        _window = null;
+    }
+
+    private void SpeechStatusChanged(string text) => Dispatcher.UIThread.Post(() =>
+    {
+        if (_shutdown.IsCancellationRequested) return;
+        Settings.SpeechStatus = text;
+        if (_window is not null) _window.Model.VoiceStatus = text;
+    });
+
+    private static bool ValidLocation(double latitude, double longitude) => double.IsFinite(latitude) && double.IsFinite(longitude)
+        && latitude is >= -90 and <= 90 && longitude is >= -180 and <= 180 && (latitude != 0 || longitude != 0);
+    private static string NormalizeMode(string value) => SourceOption.All.Any(option => option.Id == value) ? value : "combined";
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _shutdown.Cancel();
+        _speech.Dispose();
+        _stopRegistration.Dispose();
+        Dispatcher.UIThread.Post(() => { _timer.Stop(); CloseActive(); });
+        _ = ReleaseAsync();
+        if (Current == this) Current = null;
+    }
+
+    private async Task ReleaseAsync()
+    {
+        try { await _monitor; }
+        finally { _feeds.Dispose(); _shutdown.Dispose(); }
     }
 }

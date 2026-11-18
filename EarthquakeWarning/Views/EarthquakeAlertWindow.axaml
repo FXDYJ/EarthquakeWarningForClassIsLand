@@ -1,0 +1,96 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:EarthquakeWarning.Views"
+        x:Class="EarthquakeWarning.Views.EarthquakeAlertWindow"
+        Title="地震预警" SystemDecorations="None" Topmost="True"
+        Background="#090C12" Foreground="#F3F5F8" FontFamily="Microsoft YaHei UI, Segoe UI"
+        Width="1540" Height="920" MinWidth="800" MinHeight="500">
+    <Window.Styles>
+        <Style Selector="TextBlock.caption"><Setter Property="Foreground" Value="#B4BECF"/><Setter Property="FontSize" Value="18"/></Style>
+        <Style Selector="Button"><Setter Property="Background" Value="#242B37"/><Setter Property="Foreground" Value="#F3F5F8"/><Setter Property="Padding" Value="22,12"/><Setter Property="FontSize" Value="18"/></Style>
+    </Window.Styles>
+    <Viewbox Stretch="Uniform">
+        <Grid Width="1540" Height="920" RowDefinitions="100,*,98">
+            <Border Background="{Binding Header}" Padding="36,18">
+                <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="24" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}" FontSize="42" FontWeight="Bold" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Verification}" FontSize="22" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+                        <Button Content="{Binding MuteLabel}" Click="MuteClick" AutomationProperties.AutomationId="AlertMute"/>
+                        <Button Content="关闭警报 · Esc" Click="DismissClick" AutomationProperties.AutomationId="AlertDismiss"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <Grid Grid.Row="1" ColumnDefinitions="500,*" Margin="36,26,36,0">
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" Margin="0,0,32,0">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Place}" FontSize="32" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="96"/>
+                        <TextBlock Text="{Binding Time}" Classes="caption"/>
+                        <TextBlock Text="{Binding Impact}" Foreground="{Binding Accent}" FontSize="21" FontWeight="SemiBold"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Margin="0,26,0,0" Spacing="0">
+                        <TextBlock Text="{Binding Phase}" FontSize="24" Foreground="{Binding Accent}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="{Binding Countdown}" FontFamily="Bahnschrift, Microsoft YaHei UI" FontSize="142" FontWeight="Bold" Foreground="{Binding Accent}" LineHeight="160"/>
+                            <TextBlock Text="{Binding CountdownUnit}" FontSize="28" Margin="0,98,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="预估时间随报文更新，震动可能提前或延后" Classes="caption" FontSize="16" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Grid Grid.Row="2" ColumnDefinitions="*,*" Margin="0,26,0,0">
+                        <StackPanel Spacing="3"><TextBlock Text="本地预估烈度" Classes="caption"/><TextBlock Text="{Binding Intensity}" FontSize="58" FontWeight="Bold" Foreground="{Binding Accent}"/></StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="震级 M" Classes="caption"/><TextBlock Text="{Binding Magnitude}" FontSize="58" FontWeight="Bold"/></StackPanel>
+                    </Grid>
+                    <Grid Grid.Row="3" ColumnDefinitions="*,*" Margin="0,20,0,0">
+                        <StackPanel Spacing="8"><TextBlock Text="震中距离" Classes="caption"/><TextBlock Text="{Binding Distance}" FontSize="25"/></StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="8"><TextBlock Text="震源深度" Classes="caption"/><TextBlock Text="{Binding Depth}" FontSize="19" TextWrapping="Wrap"/></StackPanel>
+                    </Grid>
+                    <StackPanel Grid.Row="4" Spacing="10" VerticalAlignment="Bottom" Margin="0,20,0,20">
+                        <TextBlock Text="{Binding EventDetails}" FontSize="15" Foreground="#A4B3CB" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding VoiceStatus}" FontSize="14" Foreground="#A4B3CB" TextWrapping="Wrap" MaxHeight="50"/>
+                    </StackPanel>
+                </Grid>
+                <Grid Grid.Column="1" RowDefinitions="330,Auto,*">
+                    <Border Background="#111A27" ClipToBounds="True">
+                        <Grid>
+                            <local:SeismicMap x:Name="WaveMap"/>
+                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10">
+                                <Button Content="放大" Click="ZoomIn" Padding="12,6" FontSize="14"/>
+                                <Button Content="缩小" Click="ZoomOut" Padding="12,6" FontSize="14"/>
+                                <Button Content="震中与本地" Click="FitMap" Padding="12,6" FontSize="14"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,18,0,10">
+                        <TextBlock Text="接口交叉核验" FontSize="24" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="1" Text="接口可能共享同一上游" FontSize="16" Foreground="#B4BECF" VerticalAlignment="Center"/>
+                    </Grid>
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Evidence}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#2B3445" BorderThickness="0,0,0,1" Padding="0,12">
+                                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                                            <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="19" Foreground="#FFBE72"/>
+                                            <TextBlock Grid.Row="1" Text="{Binding Detail}" FontSize="16" Foreground="#B4BECF" Margin="0,5,0,0"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Parameters}" FontSize="16" Margin="15,5,0,0"/>
+                                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding Publisher}" FontSize="14" Foreground="#9EABC1" Margin="0,4,0,0"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+            <Border Grid.Row="2" Background="{Binding Surface}" Padding="36,20">
+                <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Guidance}" FontSize="31" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <TextBlock Grid.Column="1" Text="{Binding SecondaryAdvice}" FontSize="21" Foreground="#ECF0F6" VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </Viewbox>
+</Window>

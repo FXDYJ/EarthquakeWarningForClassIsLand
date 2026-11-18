@@ -6,6 +6,36 @@ namespace EarthquakeWarning.Models;
 public partial class EarthquakeNotificationSettings : ObservableRecipient
 {
     [ObservableProperty]
+    private string _sourceMode = "combined";
+    [ObservableProperty]
+    private bool _enableFullScreen = true;
+    [ObservableProperty]
+    private bool _monitoringEnabled = true;
+    [ObservableProperty]
+    private bool _enableOnlineMap = true;
+    [ObservableProperty]
+    private string _mapTileTemplate = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+    [ObservableProperty]
+    private string _mapAttribution = "© OpenStreetMap contributors";
+    [ObservableProperty]
+    private bool _allowConcurrentSpeech = true;
+    [ObservableProperty]
+    private bool _useRecordedCountdown = true;
+    [ObservableProperty]
+    private string _drillProfile = "felt";
+    [ObservableProperty]
+    private string _informationVoice = "自动选择";
+    [ObservableProperty]
+    private string _countdownVoice = "自动选择";
+    [ObservableProperty]
+    private bool _boostVolume = true;
+    [ObservableProperty]
+    private string _sourceStatus = "正在连接地震接口…";
+    [ObservableProperty]
+    private string _recentReports = "等待接口返回震情记录";
+    [ObservableProperty]
+    private string _speechStatus = "等待预警";
+    [ObservableProperty]
     private double _latitude = 0;
     [ObservableProperty]
     private double _longitude = 0;
@@ -32,5 +62,8 @@ public partial class EarthquakeNotificationSettings : ObservableRecipient
     /// </summary>
     [ObservableProperty]
     [property: JsonIgnore]
+    [NotifyPropertyChangedFor(nameof(DrillButtonText))]
     private bool _isDrillMode;
+
+    public string DrillButtonText => IsDrillMode ? "停止演练" : "预警演练";
 }

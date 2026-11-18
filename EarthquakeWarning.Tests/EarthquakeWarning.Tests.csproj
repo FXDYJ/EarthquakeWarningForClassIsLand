@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../EarthquakeWarning/Models/SeismicReport.cs" Link="SeismicReport.cs"/>
+    <Compile Include="../EarthquakeWarning/Models/AlertSnapshot.cs" Link="AlertSnapshot.cs"/>
+    <Compile Include="../EarthquakeWarning/Models/AlertSeverity.cs" Link="AlertSeverity.cs"/>
+    <Compile Include="../EarthquakeWarning/Services/Feeds/ConsensusEngine.cs" Link="ConsensusEngine.cs"/>
+    <Compile Include="../EarthquakeWarning/Services/Feeds/SeismicParser.cs" Link="SeismicParser.cs"/>
+    <Compile Include="../EarthquakeWarning/Calculators/HuaniaEarthquakeCalculator.cs" Link="HuaniaEarthquakeCalculator.cs"/>
+  </ItemGroup>
+</Project>

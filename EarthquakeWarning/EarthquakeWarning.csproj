@@ -5,6 +5,7 @@
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<EnableDynamicLoading>True</EnableDynamicLoading>
+		<Version>0.10.0</Version>
 		<Platforms>AnyCPU;x64</Platforms>
 	</PropertyGroup>
 
@@ -14,13 +15,19 @@
 
 	<ItemGroup>
 		<PackageReference Include="ClassIsland.PluginSdk" Version="2.0.0.1">
-			<ExcludeAssets>runtime</ExcludeAssets>
+			<ExcludeAssets>runtime;native</ExcludeAssets>
 		</PackageReference>
 		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
 		<PackageReference Include="System.Speech" Version="8.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
+		<None Include="../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
+		<AvaloniaResource Include="Assets/land.geojson" />
+		<AvaloniaResource Include="Assets/provinces.geojson" />
+		<AvaloniaResource Include="Assets/admin-labels.json" />
+		<AvaloniaResource Include="Assets/Countdown/*.wav" />
+		<None Update="Assets/NOTICE.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
 		<None Update="manifest.yml">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>

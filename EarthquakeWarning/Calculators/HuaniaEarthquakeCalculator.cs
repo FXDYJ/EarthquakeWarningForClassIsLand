@@ -176,7 +176,7 @@ public static class HuaniaEarthQuakeCalculator
         {
             return SLOPE[i] * distance + INTERCEPT[i];
         }
-        if (Math.Abs(distance - fArr2[length]) < 0.0)
+        if (distance >= fArr2[length])
         {
             return fArr3[^1];
         }

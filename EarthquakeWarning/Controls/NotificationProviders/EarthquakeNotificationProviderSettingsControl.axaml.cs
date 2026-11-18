@@ -5,62 +5,41 @@ using ClassIsland.Platforms.Abstraction;
 using EarthquakeWarning.Models;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Speech.Synthesis;
+using EarthquakeWarning.Services.NotificationProviders;
 
 namespace EarthquakeWarning.Controls.NotificationProviders;
 
 public partial class EarthquakeNotificationProviderSettingsControl : NotificationProviderControlBase<EarthquakeNotificationSettings>
 {
+    public IReadOnlyList<SourceOption> SourceOptions => SourceOption.All;
+    public IReadOnlyList<SourceOption> DrillOptions { get; } = new[]
+    {
+        new SourceOption("weak", "无感或微弱震感"), new SourceOption("felt", "有感无破坏"), new SourceOption("damaging", "有感有破坏")
+    };
+    public IReadOnlyList<string> Voices { get; } = GetVoices();
+
+    private static IReadOnlyList<string> GetVoices()
+    {
+        try
+        {
+            using var speech = new SpeechSynthesizer();
+            return new[] { "自动选择" }.Concat(speech.GetInstalledVoices().Where(voice => voice.Enabled
+                && voice.VoiceInfo.Culture.TwoLetterISOLanguageName == "zh").Select(voice => voice.VoiceInfo.Name)).ToArray();
+        }
+        catch (Exception error) { Debug.WriteLine(error); return new[] { "自动选择" }; }
+    }
     public EarthquakeNotificationProviderSettingsControl()
     {
         InitializeComponent();
     }
 
-    private async void btnExample_Click(object sender, RoutedEventArgs e)
+    private void btnExample_Click(object sender, RoutedEventArgs e)
     {
-        EarthquakeInfo? buffer = null;
-        btnExample.IsEnabled = false;
-        try
-        {
-            buffer = JsonSerializer.Deserialize<EarthquakeInfo>(JsonSerializer.Serialize(Settings.EarthquakeInfo));
-            // 演练期间屏蔽真实预警动作，避免误执行关机等命令。
-            Settings.IsDrillMode = true;
-
-            DateTime startTime = DateTime.Now;
-            // 每次演练使用独立事件 ID，确保能重新触发语音和音量增强。
-            var drillEventId = $"example-event-{Guid.NewGuid():N}";
-            for (int i = 0; i < 6; i++)
-            {
-                Settings.EarthquakeInfo.UpdateFrom(new EarthquakeInfo
-                {
-                    Id = $"example-{i}",
-                    EventId = drillEventId,
-                    Updates = i + 1,
-                    Latitude = 31.0,
-                    Longitude = 103.4,
-                    Depth = 14,
-                    PlaceName = "四川省阿坝藏族羌族自治州汶川县",
-                    ShockTime = EarthquakeTime.Format(startTime),
-                    UpdateTime = EarthquakeTime.Format(DateTime.Now),
-                    Magnitude = 4.0 + (i + 1.0) * 0.8,
-                    EpiIntensity = 12
-                });
-                await Task.Delay(10000);
-            }
-            await Task.Delay(20000);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"预警演练失败: {ex}");
-        }
-        finally
-        {
-            if (buffer is not null)
-            {
-                Settings.EarthquakeInfo.UpdateFrom(buffer);
-            }
-            Settings.IsDrillMode = false;
-            btnExample.IsEnabled = true;
-        }
+        var provider = EarthquakeNotificationProvider.Current;
+        if (provider is null) { Settings.Info = "提醒提供方尚未启动，请稍后重试"; return; }
+        if (Settings.IsDrillMode) provider.StopDrill();
+        else provider.StartDrill();
     }
 
     private async void btnLocate_Click(object? sender, RoutedEventArgs e)

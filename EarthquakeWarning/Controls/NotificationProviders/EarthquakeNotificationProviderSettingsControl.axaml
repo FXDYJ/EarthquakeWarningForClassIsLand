@@ -21,17 +21,36 @@
                         IsOpen="True"
                         IsClosable="False"
                         Severity="Informational"
-                        Message="地震预警信息通过小米 MIUI 地震预警服务提供。作者不对信息的准确性、有效性、及时性作承诺和保证。" />
+                        Message="综合模式先显示待核验提示，至少两个接口参数吻合后才全屏、播报和执行动作。接口可能共享上游，不能消除台网本身的误报。" />
+
+            <ui:SettingsExpander Header="地震监测" IconSource="Cloud" Description="{Binding Settings.ServerInfo}" IsExpanded="True">
+                <ui:SettingsExpanderItem Content="启用监测与告警">
+                    <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.MonitoringEnabled}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="数据来源">
+                    <ui:SettingsExpanderItem.Footer>
+                        <ComboBox Width="250" ItemsSource="{Binding SourceOptions}" SelectedValueBinding="{Binding Id}" SelectedValue="{Binding Settings.SourceMode}">
+                            <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="确认后全屏" Description="在 CI 所在屏幕显示；Esc 可关闭，同一事件不会反复弹窗">
+                    <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.EnableFullScreen}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <TextBlock Text="单接口模式仅用于查看与 CI 提示。综合模式核对发震时间、震中、震级和可用深度；Wolfx 的推送与 HTTP 合并计数。" TextWrapping="Wrap" Margin="12"/>
+                <Expander Header="各接口连接详情" Margin="12"><TextBlock Text="{Binding Settings.SourceStatus}" TextWrapping="Wrap"/></Expander>
+            </ui:SettingsExpander>
 
             <TextBlock Text="服务状态"
                        Theme="{StaticResource BodyStrongTextBlockStyle}"
                        Margin="2,12,0,4" />
-            <ui:SettingsExpander Header="运行状态"
+            <ui:SettingsExpander Header="最近震情记录"
                                  Margin="0"
                                  IconSource="Cloud"
                                  Description="{Binding Settings.ServerInfo}">
                 <ui:SettingsExpanderItem Content="当前数据"
                                          Description="{Binding Settings.Info}" />
+                <TextBlock Text="{Binding Settings.RecentReports}" Margin="12" TextWrapping="Wrap"/>
             </ui:SettingsExpander>
 
             <TextBlock Text="预警配置"
@@ -90,15 +109,44 @@
                 </ui:SettingsExpander.Footer>
             </ui:SettingsExpander>
 
-            <ui:SettingsExpander Header="倒计时语音"
+            <ui:SettingsExpander Header="地图与地名" IconSource="Target" Description="在线地图支持随缩放显示省市、区县和街道；断网保留离线行政区与城市地名">
+                <ui:SettingsExpanderItem Content="启用在线地图">
+                    <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.EnableOnlineMap}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="瓦片地址" Description="HTTPS，256 像素瓦片，包含 {z}/{x}/{y}">
+                    <ui:SettingsExpanderItem.Footer><TextBox Width="260" Text="{Binding Settings.MapTileTemplate}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="地图署名">
+                    <ui:SettingsExpanderItem.Footer><TextBox Width="260" Text="{Binding Settings.MapAttribution}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+            </ui:SettingsExpander>
+
+            <ui:SettingsExpander Header="地震信息与倒计时语音"
                                  Margin="0"
                                  IconSource="Volume"
-                                 Description="预警开始时自动提高系统音量；10 秒前每 2 秒播报一次，最后 10 秒逐秒播报">
+                                 Description="先说明地震与避险方式，再报预计到达秒数；最后 10 秒暂停详情，逐秒倒数">
                 <ui:SettingsExpanderItem Content="启用语音播报">
                     <ui:SettingsExpanderItem.Footer>
                         <ToggleSwitch IsChecked="{Binding Settings.IsSpeechEnabled}" />
                     </ui:SettingsExpanderItem.Footer>
                 </ui:SettingsExpanderItem>
+
+                <ui:SettingsExpanderItem Content="国内常见报数节奏" Description="固定离线数字音频：无感只报数，有感无破坏加单滴，有感有破坏加双滴；依本地预估烈度调整">
+                    <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.UseRecordedCountdown}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="允许双语音" Description="信息解说与短促报数分工；最后十秒只保留报数">
+                    <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.AllowConcurrentSpeech}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="震情信息音色">
+                    <ui:SettingsExpanderItem.Footer><ComboBox Width="260" ItemsSource="{Binding Voices}" SelectedItem="{Binding Settings.InformationVoice}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="备用合成报数音色" Description="关闭固定离线报数时使用">
+                    <ui:SettingsExpanderItem.Footer><ComboBox Width="260" ItemsSource="{Binding Voices}" SelectedItem="{Binding Settings.CountdownVoice}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="预警时增强系统音量" Description="播报结束、静音或关闭后恢复原音量">
+                    <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.BoostVolume}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <TextBlock Text="{Binding Settings.SpeechStatus}" Margin="12" TextWrapping="Wrap"/>
 
                 <ui:SettingsExpanderItem Content="播报阈值"
                                          Description="与提醒阈值相互独立">
@@ -137,10 +185,16 @@
             <TextBlock Text="调试与测试"
                        Theme="{StaticResource BodyStrongTextBlockStyle}"
                        Margin="2,12,0,4" />
-            <ui:SettingsExpander Header="预警演练"
+            <Grid ColumnDefinitions="*,Auto" Margin="12,8">
+                <TextBlock Text="演练影响等级" VerticalAlignment="Center"/>
+                <ComboBox Grid.Column="1" Width="220" ItemsSource="{Binding DrillOptions}" SelectedValueBinding="{Binding Id}" SelectedValue="{Binding Settings.DrillProfile}">
+                    <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate>
+                </ComboBox>
+            </Grid>
+            <ui:SettingsExpander Header="{Binding Settings.DrillButtonText}"
                                  Margin="0"
                                  IconSource="Play"
-                                 Description="模拟一次地震预警，检查提醒和倒计时语音"
+                                 Description="模拟单源待核验、两接口吻合、全屏与语音；屏蔽外部命令，可随时停止"
                                  ActionIconSource="ChevronRight"
                                  IsClickEnabled="True"
                                  x:Name="btnExample"
