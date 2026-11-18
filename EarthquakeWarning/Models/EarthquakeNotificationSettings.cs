@@ -30,6 +30,10 @@ public partial class EarthquakeNotificationSettings : ObservableRecipient
     [ObservableProperty]
     private bool _boostVolume = true;
     [ObservableProperty]
+    private bool _suppressOtherAudio = true;
+    [ObservableProperty]
+    private string _audioStatus = "等待预警";
+    [ObservableProperty]
     private string _sourceStatus = "正在连接地震接口…";
     [ObservableProperty]
     private string _recentReports = "等待接口返回震情记录";

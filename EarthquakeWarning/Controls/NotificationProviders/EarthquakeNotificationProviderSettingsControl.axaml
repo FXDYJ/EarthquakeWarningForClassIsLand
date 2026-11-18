@@ -21,7 +21,7 @@
                         IsOpen="True"
                         IsClosable="False"
                         Severity="Informational"
-                        Message="综合模式先显示待核验提示，至少两个接口参数吻合后才全屏、播报和执行动作。接口可能共享上游，不能消除台网本身的误报。" />
+                        Message="综合模式等待 CENC 直连正式测定，与另一接收路径的预警严格吻合后才升级；可能错过提前量。接口可能共享上游，仍不能保证零误报。" />
 
             <ui:SettingsExpander Header="地震监测" IconSource="Cloud" Description="{Binding Settings.ServerInfo}" IsExpanded="True">
                 <ui:SettingsExpanderItem Content="启用监测与告警">
@@ -131,7 +131,7 @@
                     </ui:SettingsExpanderItem.Footer>
                 </ui:SettingsExpanderItem>
 
-                <ui:SettingsExpanderItem Content="国内常见报数节奏" Description="固定离线数字音频：无感只报数，有感无破坏加单滴，有感有破坏加双滴；依本地预估烈度调整">
+                <ui:SettingsExpanderItem Content="国内常见报数节奏" Description="自然语音报数，末 10 秒逐秒；无感无滴、有感单滴、破坏风险双滴">
                     <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.UseRecordedCountdown}"/></ui:SettingsExpanderItem.Footer>
                 </ui:SettingsExpanderItem>
                 <ui:SettingsExpanderItem Content="允许双语音" Description="信息解说与短促报数分工；最后十秒只保留报数">
@@ -143,9 +143,13 @@
                 <ui:SettingsExpanderItem Content="备用合成报数音色" Description="关闭固定离线报数时使用">
                     <ui:SettingsExpanderItem.Footer><ComboBox Width="260" ItemsSource="{Binding Voices}" SelectedItem="{Binding Settings.CountdownVoice}"/></ui:SettingsExpanderItem.Footer>
                 </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="预警时增强系统音量" Description="播报结束、静音或关闭后恢复原音量">
+                <ui:SettingsExpanderItem Content="预警时将音量调至最大" Description="默认开启；静音、撤销或关闭预警后恢复。演练不接管系统音量">
                     <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.BoostVolume}"/></ui:SettingsExpanderItem.Footer>
                 </ui:SettingsExpanderItem>
+                <ui:SettingsExpanderItem Content="暂停其他媒体并静音其他应用" Description="默认开启；结束后恢复原静音状态，已暂停的媒体由你手动继续">
+                    <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.SuppressOtherAudio}"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <TextBlock Text="{Binding Settings.AudioStatus}" Margin="12" TextWrapping="Wrap"/>
                 <TextBlock Text="{Binding Settings.SpeechStatus}" Margin="12" TextWrapping="Wrap"/>
 
                 <ui:SettingsExpanderItem Content="播报阈值"

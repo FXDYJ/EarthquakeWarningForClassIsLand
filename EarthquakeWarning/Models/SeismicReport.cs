@@ -10,6 +10,7 @@ public sealed record SeismicReport(
     bool Cancelled = false, bool Training = false, double? MaximumIntensity = null)
 {
     public string Key => $"{Gateway}/{Feed}/{EventId}";
+    public bool IsOfficialBulletin => Gateway == "CENC" && Feed == "cenc-bulletin" && Kind == ReportKind.Bulletin;
     public bool HasValidParameters => double.IsFinite(Latitude) && Latitude is >= -90 and <= 90
         && double.IsFinite(Longitude) && Longitude is >= -180 and <= 180
         && double.IsFinite(Magnitude) && Magnitude is > 0 and <= 10
@@ -39,12 +40,18 @@ public sealed record SourceOption(string Id, string Name)
 public sealed record FeedHealth(string Name, DateTimeOffset? LastSuccess, string Status, bool Available);
 
 public sealed record VerifiedEarthquake(string Id, SeismicReport Preferred,
-    IReadOnlyList<SeismicReport> Reports, int MatchingGateways, bool HasConflict, bool Cancelled)
+    IReadOnlyList<SeismicReport> Reports, int MatchingGateways, bool HasConflict, bool Cancelled, bool Simulated = false,
+    string HoldReason = "")
 {
-    public bool Confirmed => !Cancelled && !HasConflict && MatchingGateways >= 2
-        && Reports.Any(report => report.Kind == ReportKind.EarlyWarning && !report.Cancelled);
+    public bool Confirmed => !Cancelled && !HasConflict && HoldReason.Length == 0 && MatchingGateways >= 2
+        && Reports.All(report => !report.Training && !report.Cancelled && report.HasValidParameters)
+        && Reports.All(first => Reports.All(second => Services.Feeds.ConsensusEngine.Compatible(first, second)))
+        && (Simulated || (Preferred.IsOfficialBulletin && Preferred.Depth is > 0 and <= 30
+            && Reports.Any(report => report.Kind == ReportKind.EarlyWarning && report.Gateway != "CENC")));
     public string Verification => Cancelled ? "预警已撤销"
         : HasConflict ? "参数存在分歧，继续核验"
-        : Confirmed ? $"{MatchingGateways} 个接口核对通过"
-        : "单一接口，等待交叉核验";
+        : HoldReason.Length > 0 ? HoldReason
+        : Confirmed ? (Simulated ? "演练核验通过" : "正式测定与预警吻合")
+        : MatchingGateways < 2 ? "单一接口，等待交叉核验"
+        : "等待正式测定与预警交叉核验";
 }

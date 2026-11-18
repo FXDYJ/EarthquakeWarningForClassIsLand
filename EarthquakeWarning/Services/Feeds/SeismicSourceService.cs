@@ -15,6 +15,8 @@ public sealed class SeismicSourceService : IDisposable
     { Timeout = TimeSpan.FromSeconds(8) };
     private readonly ConcurrentDictionary<string, FeedHealth> _health = new();
     private readonly ConcurrentDictionary<string, IReadOnlyList<SeismicReport>> _latest = new();
+    private readonly object _receiveGate = new();
+    private int _generation;
     public ConsensusEngine Engine { get; } = new();
     public IReadOnlyList<FeedHealth> Health => _health.Values.OrderBy(value => value.Name).ToArray();
     public IReadOnlyList<SeismicReport> LatestReports => _latest.Values.SelectMany(value => value)
@@ -24,19 +26,25 @@ public sealed class SeismicSourceService : IDisposable
 
     public Task RunAsync(string mode, CancellationToken token)
     {
+        var generation = Invalidate();
         _health.Clear();
         _latest.Clear();
         var jobs = new List<Task>();
         foreach (var feed in WolfxFeeds.Concat(new[] { "miui", "cenc-early", "cenc-bulletin" }))
         {
             if (mode != "combined" && mode != feed && !(mode == "wolfx-live" && feed.EndsWith("eew", StringComparison.Ordinal))) continue;
-            jobs.Add(PollAsync(feed, token));
+            jobs.Add(PollAsync(feed, generation, token));
         }
-        if (mode is "combined" or "wolfx-live") jobs.Add(ListenAsync(token));
+        if (mode is "combined" or "wolfx-live") jobs.Add(ListenAsync(generation, token));
         return Task.WhenAll(jobs);
     }
 
-    private async Task PollAsync(string feed, CancellationToken token)
+    public int Invalidate()
+    {
+        lock (_receiveGate) { _generation++; Engine.ResetVotes(); return _generation; }
+    }
+
+    private async Task PollAsync(string feed, int generation, CancellationToken token)
     {
         var failures = 0;
         while (!token.IsCancellationRequested)
@@ -47,15 +55,14 @@ public sealed class SeismicSourceService : IDisposable
                 using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, token);
                 response.EnsureSuccessStatusCode();
                 var json = await response.Content.ReadAsStringAsync(token);
-                Receive(feed, json);
-                _health[feed] = new(feed, DateTimeOffset.Now, "接口可达", true);
+                Receive(feed, json, generation, token);
                 failures = 0;
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
             catch (Exception error)
             {
                 failures++;
-                Failed(feed, error);
+                if (!token.IsCancellationRequested && generation == Volatile.Read(ref _generation)) Failed(feed, error);
             }
             var seconds = feed switch { "cenc-early" => 3, "miui" => 5,
                 "cenc-bulletin" => 15, "cenc_eqlist" or "jma_eqlist" => 30, _ => 10 };
@@ -81,7 +88,7 @@ public sealed class SeismicSourceService : IDisposable
         return new HttpRequestMessage(HttpMethod.Get, $"https://api.wolfx.jp/{feed}.json");
     }
 
-    private async Task ListenAsync(CancellationToken token)
+    private async Task ListenAsync(int generation, CancellationToken token)
     {
         var retry = 0;
         while (!token.IsCancellationRequested)
@@ -114,29 +121,35 @@ public sealed class SeismicSourceService : IDisposable
                         using var document = JsonDocument.Parse(json);
                         if (document.RootElement.TryGetProperty("type", out var type) && type.GetString() == "heartbeat")
                             await socket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes("ping")), WebSocketMessageType.Text, true, token);
-                        else Receive("wolfx-live", json);
-                        _health["wolfx-live"] = new("Wolfx WebSocket", DateTimeOffset.Now, "实时连接正常", true);
+                        else Receive("wolfx-live", json, generation, token);
+                        lock (_receiveGate)
+                            if (!token.IsCancellationRequested && generation == _generation)
+                                _health["wolfx-live"] = new("Wolfx WebSocket", DateTimeOffset.Now, "实时连接正常", true);
                     }
-                    catch (JsonException error) { Failed("wolfx-live", error); }
+                    catch (JsonException error) { if (!token.IsCancellationRequested && generation == Volatile.Read(ref _generation)) Failed("wolfx-live", error); }
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
-            catch (Exception error) { Failed("wolfx-live", error); }
+            catch (Exception error) { if (!token.IsCancellationRequested && generation == Volatile.Read(ref _generation)) Failed("wolfx-live", error); }
             finally { socket.Abort(); }
             await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Min(retry++, 5)))), token);
         }
     }
 
-    private void Receive(string feed, string json)
+    private void Receive(string feed, string json, int generation, CancellationToken token)
     {
         var now = DateTimeOffset.UtcNow;
         var reports = SeismicParser.Parse(feed, json);
-        foreach (var group in reports.Where(report => report.HasValidParameters && !report.Training).GroupBy(report => report.Feed))
-            _latest[group.Key] = group.GroupBy(report => report.EventId)
-                .Select(items => items.OrderByDescending(item => item.ReportNumber).ThenByDescending(item => item.ReportTime).First())
-                .OrderByDescending(item => item.OriginTime).Take(10).ToArray();
-        foreach (var report in reports.OrderBy(item => item.ReportTime).ThenBy(item => item.ReportNumber))
-            Engine.Add(report, now);
+        lock (_receiveGate)
+        {
+            if (token.IsCancellationRequested || generation != _generation) return;
+            foreach (var group in reports.Where(report => report.HasValidParameters && !report.Training).GroupBy(report => report.Feed))
+                _latest[group.Key] = group.GroupBy(report => report.EventId)
+                    .Select(items => items.OrderByDescending(item => item.ReportNumber).ThenByDescending(item => item.ReportTime).First())
+                    .OrderByDescending(item => item.OriginTime).Take(10).ToArray();
+            Engine.AddBatch(reports, now);
+            _health[feed] = new(feed, DateTimeOffset.Now, "接口可达", true);
+        }
     }
 
     private void Failed(string feed, Exception error)

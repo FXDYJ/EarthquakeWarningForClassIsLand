@@ -46,20 +46,20 @@ public partial class AlertViewModel : ObservableObject
         Verification = snapshot.Event.Verification;
         Place = report.PlaceName;
         Magnitude = report.Magnitude.ToString("F1");
-        Intensity = snapshot.LocalIntensity.ToString("F1");
+        Intensity = snapshot.ModelSupported ? snapshot.LocalIntensity.ToString("F1") : "—";
         Distance = $"{snapshot.Distance:F0} km";
-        Depth = report.Depth is > 0 ? $"{report.Depth:F0} km" : "未知 / 估算采用 10 km";
+        Depth = report.Depth is > 0 ? $"{report.Depth:F0} km" : "未知";
         Time = report.OriginTime.ToOffset(TimeSpan.FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss");
-        Phase = snapshot.Event.Cancelled ? "预警已撤销" : snapshot.Event.HasConflict ? "参数分歧，暂停到达播报"
+        Phase = !snapshot.ModelSupported ? "超出估算范围" : snapshot.Event.Cancelled ? "预警已撤销" : snapshot.Event.HasConflict ? "参数分歧，暂停到达播报"
             : snapshot.Remaining > 0 ? (severity.Impact == AlertImpact.Weak ? "预计震动到达" : "预计强震动到达") : "预计震动已到达";
-        Countdown = snapshot.Event.Cancelled || snapshot.Event.HasConflict ? "—"
+        Countdown = !snapshot.ModelSupported || snapshot.Event.Cancelled || snapshot.Event.HasConflict ? "—"
             : snapshot.Remaining > 0 ? Math.Ceiling(snapshot.Remaining).ToString("0") : "到达";
         CountdownUnit = snapshot.Remaining > 0 && !snapshot.Event.Cancelled && !snapshot.Event.HasConflict ? "秒" : "";
         Guidance = snapshot.Event.Cancelled ? "预警撤销，请关注官方后续信息"
             : snapshot.Event.HasConflict ? "参数存在分歧，正在重新核验"
             : snapshot.Remaining > 0 ? severity.Advice
             : severity.Impact == AlertImpact.Weak ? "持续关注官方后续震情" : "保持就近避险，震动结束后有序撤离";
-        EventDetails = $"纬度 {report.Latitude:F3}°  ·  经度 {report.Longitude:F3}°  ·  第 {report.ReportNumber?.ToString() ?? "—"} 报\n事件 {report.EventId}";
+        EventDetails = $"纬度 {report.Latitude:F3}°  ·  经度 {report.Longitude:F3}°  ·  第 {report.ReportNumber?.ToString() ?? "—"} 报";
         var evidence = snapshot.Event.Reports.OrderBy(item => item.Gateway).ThenBy(item => item.Feed).ToArray();
         if (report == _preferred && evidence.SequenceEqual(_previousEvidence)) return;
         _preferred = report;

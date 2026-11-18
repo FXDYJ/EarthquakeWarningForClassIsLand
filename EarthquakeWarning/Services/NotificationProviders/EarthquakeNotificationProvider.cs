@@ -36,6 +36,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
     private DateTimeOffset _drillStart;
     private SeismicReport? _drillReport;
     private string? _speechEvent;
+    private AlertAudioFocus? _audioFocus;
     private DateTimeOffset _lastHealth;
     private int _disposed;
     public static EarthquakeNotificationProvider? Current { get; private set; }
@@ -95,11 +96,13 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
 
     private void Evaluate()
     {
+        if (_disposed != 0 || _shutdown.IsCancellationRequested) return;
         var mode = NormalizeMode(Settings.SourceMode);
         if (_mode != mode || _enabled != Settings.MonitoringEnabled)
         {
             _mode = mode;
             _enabled = Settings.MonitoringEnabled;
+            _feeds.Invalidate();
             CloseActive();
             if (!_enabled) StopDrill();
         }
@@ -127,6 +130,17 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         { _shown.Remove(key); _dismissed.Remove(key); _pending.Remove(key); _actions.Remove(key); _presented.Remove(key); _muted.Remove(key); }
         var snapshots = _feeds.Engine.GetEvents(now, mode)
             .Select(item => new AlertSnapshot(item, Settings.Latitude, Settings.Longitude)).ToList();
+        foreach (var unsupported in snapshots.Where(item => !item.ModelSupported && !item.Event.Cancelled
+                     && item.Distance <= 500 && item.Event.Reports.Any(report => report.Kind == ReportKind.EarlyWarning)))
+        {
+            const string state = "本地烈度无法可靠估算，暂不升级";
+            if (!_pending.ContainsKey(unsupported.EventKey))
+            {
+                _pending[unsupported.EventKey] = state;
+                _shown.TryAdd(unsupported.EventKey, now);
+                ShowCompact(unsupported, state);
+            }
+        }
         if (_drill is not null && snapshots.Any(item => item.Event.Confirmed && IsRelevant(item) && item.Remaining > -30)) StopDrill();
         if (_drill is not null && _drillReport is not null)
         {
@@ -162,6 +176,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
             {
                 Volatile.Write(ref _active, current);
                 _speech.Stop();
+                ReleaseAudioFocus();
                 _speechEvent = null;
                 Settings.SpeechStatus = "参数存在分歧，语音已暂停";
                 if (_window is not null) _window.Model.VoiceStatus = Settings.SpeechStatus;
@@ -177,6 +192,13 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         var changed = _active?.EventKey != selected.EventKey;
         if (changed) { _speech.Stop(); _speechEvent = null; }
         Volatile.Write(ref _active, selected);
+        if (!selected.Drill && !_muted.Contains(selected.EventKey) && (Settings.SuppressOtherAudio || Settings.BoostVolume))
+        {
+            if (_audioFocus is null) AlertSpeechCoordinator.ClearHostSpeech();
+            _audioFocus ??= new AlertAudioFocus(Settings.SuppressOtherAudio, Settings.BoostVolume,
+                text => Dispatcher.UIThread.Post(() => { if (_disposed == 0) Settings.AudioStatus = text; }));
+        }
+        else ReleaseAudioFocus();
         UpdateLegacyInfo(selected);
         _shown.TryAdd(selected.EventKey, now);
         if (_window is not null && (!Settings.EnableFullScreen || (!selected.Drill && selected.LocalIntensity <= Settings.Threshold))) CloseWindow();
@@ -193,7 +215,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         }
         if (_window is not null) _window.Model.MuteLabel = _muted.Contains(selected.EventKey) ? "已静音" : "静音";
         if (Settings.IsSpeechEnabled && (selected.Drill || selected.LocalIntensity > Settings.SpeechThreshold)
-            && _speechEvent != selected.EventKey && !_muted.Contains(selected.EventKey))
+            && _speechEvent != selected.EventKey && !_muted.Contains(selected.EventKey) && (_audioFocus?.Ready.IsCompleted ?? true))
         {
             _speechEvent = selected.EventKey;
             _speech.Start(() => Volatile.Read(ref _active), Settings);
@@ -202,8 +224,8 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         if (selected.Drill && selected.Remaining < -15) StopDrill();
     }
 
-    private bool IsRelevant(AlertSnapshot item) => item.Drill || item.LocalIntensity > Settings.Threshold
-        || (Settings.IsSpeechEnabled && item.LocalIntensity > Settings.SpeechThreshold);
+    private bool IsRelevant(AlertSnapshot item) => item.ModelSupported && (item.Drill || item.LocalIntensity > Settings.Threshold
+        || (Settings.IsSpeechEnabled && item.LocalIntensity > Settings.SpeechThreshold));
 
     private void UpdateLegacyInfo(AlertSnapshot snapshot)
     {
@@ -229,7 +251,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
             MaskContent = mask,
             OverlayContent = new NotificationContent
             {
-                Content = new TextBlock { Text = $"{state}\n{snapshot.Report.PlaceName} M{snapshot.Report.Magnitude:F1} · 本地预估烈度 {snapshot.LocalIntensity:F1}",
+                Content = new TextBlock { Text = $"{state}\n{snapshot.Report.PlaceName} M{snapshot.Report.Magnitude:F1} · 本地预估烈度 {(snapshot.ModelSupported ? snapshot.LocalIntensity.ToString("F1") : "未知")}",
                     TextWrapping = TextWrapping.Wrap, FontSize = 22, Margin = new Avalonia.Thickness(18) },
                 Duration = TimeSpan.FromSeconds(6), IsSpeechEnabled = false
             }
@@ -275,7 +297,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         var magnitude = Math.Clamp(5 + (targetIntensity - baseline) / Math.Max(0.1, slope), 1, 9.5);
         _drillReport = new SeismicReport("drill-a", "演练接口 A", "本地模拟数据", Guid.NewGuid().ToString("N"), 1,
             origin, now, latitude, longitude, magnitude, 12, "附近地区（模拟震中）");
-        _drill = new ConsensusEngine();
+        _drill = new ConsensusEngine(simulation: true);
         _drill.Add(_drillReport, now);
         _drillStart = now;
         Settings.IsDrillMode = true;
@@ -294,6 +316,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
     {
         if (_active is not null) _muted.Add(_active.EventKey);
         _speech.Stop();
+        ReleaseAudioFocus();
         Settings.SpeechStatus = "本次预警已静音";
     }
 
@@ -302,12 +325,14 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         if (_active is not null) _dismissed.Add(_active.EventKey);
         _window = null;
         _speech.Stop();
+        ReleaseAudioFocus();
     }
 
     private void CloseActive()
     {
         CloseWindow();
         _speech.Stop();
+        ReleaseAudioFocus();
         _speechEvent = null;
         Volatile.Write(ref _active, null);
     }
@@ -327,6 +352,8 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         if (_window is not null) _window.Model.VoiceStatus = text;
     });
 
+    private void ReleaseAudioFocus() { _audioFocus?.Dispose(); _audioFocus = null; }
+
     private static bool ValidLocation(double latitude, double longitude) => double.IsFinite(latitude) && double.IsFinite(longitude)
         && latitude is >= -90 and <= 90 && longitude is >= -180 and <= 180 && (latitude != 0 || longitude != 0);
     private static string NormalizeMode(string value) => SourceOption.All.Any(option => option.Id == value) ? value : "combined";
@@ -336,6 +363,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _shutdown.Cancel();
         _speech.Dispose();
+        ReleaseAudioFocus();
         _stopRegistration.Dispose();
         Dispatcher.UIThread.Post(() => { _timer.Stop(); CloseActive(); });
         _ = ReleaseAsync();

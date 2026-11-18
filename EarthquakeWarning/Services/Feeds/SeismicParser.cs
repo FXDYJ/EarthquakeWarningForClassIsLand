@@ -21,13 +21,14 @@ public static class SeismicParser
         var origin = Time(root, "OriginTime", japan ? 9 : 8);
         var issued = Time(root, japan ? "AnnouncedTime" : "ReportTime", japan ? 9 : 8);
         var id = Text(root, "EventID") ?? Text(root, "ID");
-        if (origin is null || id is null) return Array.Empty<SeismicReport>();
+        var cancelled = Flag(root, "isCancel");
+        if (id is null || (origin is null && !cancelled)) return Array.Empty<SeismicReport>();
         var report = new SeismicReport(feed, "Wolfx", Publisher(feed), id,
-            Integer(root, japan ? "Serial" : "ReportNum"), origin.Value, issued ?? origin.Value,
+            Integer(root, japan ? "Serial" : "ReportNum"), origin ?? DateTimeOffset.MinValue, issued ?? origin ?? DateTimeOffset.MinValue,
             Number(root, "Latitude") ?? double.NaN, Number(root, "Longitude") ?? double.NaN,
             Number(root, "Magnitude") ?? Number(root, "Magunitude") ?? double.NaN,
             PositiveDepth(root, "Depth"), Text(root, japan ? "Hypocenter" : "HypoCenter") ?? "未知震中",
-            Cancelled: Flag(root, "isCancel"), Training: Flag(root, "isTraining") || Flag(root, "isAssumption"),
+            Cancelled: cancelled, Training: IsTraining(root),
             MaximumIntensity: Number(root, "MaxIntensity"));
         return new[] { report };
     }
@@ -43,12 +44,13 @@ public static class SeismicParser
             var origin = Unix(item, "startAt", true);
             var updated = Unix(item, "updateAt", true);
             var id = Text(item, "eventId");
-            if (origin is null || updated is null || string.IsNullOrEmpty(id) || id == "0") continue;
+            var cancelled = Flag(item, "isCancel");
+            if (((origin is null || updated is null) && !cancelled) || string.IsNullOrEmpty(id) || id == "0") continue;
             reports.Add(new SeismicReport("miui", "MIUI", Text(item, "signature") ?? "小米预警服务",
-                id, Integer(item, "update"), origin.Value, updated.Value,
+                id, Integer(item, "update"), origin ?? DateTimeOffset.MinValue, updated ?? origin ?? DateTimeOffset.MinValue,
                 Number(item, "latitude") ?? double.NaN, Number(item, "longitude") ?? double.NaN,
                 Number(item, "magnitude") ?? double.NaN, PositiveDepth(item, "depth"),
-                Text(item, "epicenter") ?? "未知震中"));
+                Text(item, "epicenter") ?? "未知震中", Cancelled: Flag(item, "isCancel"), Training: IsTraining(item)));
         }
         return reports;
     }
@@ -63,14 +65,14 @@ public static class SeismicParser
         {
             var origin = Unix(item, "created_at", false);
             var id = Text(item, "third_id") ?? Text(item, "id");
-            if (origin is null || id is null) continue;
+            if (id is null || (origin is null && !Flag(item, "isCancel"))) continue;
             reports.Add(new SeismicReport(feed, "CENC", "中国地震台网", id,
-                Integer(item, "serial_number"), origin.Value, origin.Value,
+                Integer(item, "serial_number"), origin ?? DateTimeOffset.MinValue, origin ?? DateTimeOffset.MinValue,
                 Number(item, "latitude") ?? double.NaN, Number(item, "longitude") ?? double.NaN,
                 Number(item, "level") ?? double.NaN, PositiveDepth(item, "depth"),
                 Text(item, "location") ?? "未知震中",
                 feed == "cenc-early" ? ReportKind.EarlyWarning : ReportKind.Bulletin,
-                MaximumIntensity: Number(item, "epicenter_intensity")));
+                Cancelled: Flag(item, "isCancel"), Training: IsTraining(item), MaximumIntensity: Number(item, "epicenter_intensity")));
         }
         return reports;
     }
@@ -112,7 +114,10 @@ public static class SeismicParser
     private static double? Number(JsonElement item, string name) => double.TryParse(Text(item, name)?.Replace("km", ""),
         NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value) ? value : null;
     private static int? Integer(JsonElement item, string name) => int.TryParse(Text(item, name), out var value) ? value : null;
-    private static bool Flag(JsonElement item, string name) => bool.TryParse(Text(item, name), out var value) && value;
+    private static bool Flag(JsonElement item, string name) => Text(item, name) is { } text
+        && (text == "1" || bool.TryParse(text, out var value) && value);
+    private static bool IsTraining(JsonElement item) => Flag(item, "isTraining") || Flag(item, "isAssumption")
+        || Flag(item, "isTest") || Flag(item, "test") || Flag(item, "training");
     private static double? PositiveDepth(JsonElement item, string name) => Number(item, name) is > 0 and <= 800 ? Number(item, name) : null;
 
     private static DateTimeOffset? Time(JsonElement item, string name, int offset)

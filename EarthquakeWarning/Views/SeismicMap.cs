@@ -33,6 +33,8 @@ public sealed class SeismicMap : Control
     private double _dragY;
     private string? _mapError;
     private DateTimeOffset _retryAfter;
+    private string _legend = "";
+    public event Action<string>? LegendChanged;
 
     public SeismicMap()
     {
@@ -162,12 +164,14 @@ public sealed class SeismicMap : Control
         context.DrawEllipse(Brush.Parse("#7CE9F5"), new Pen(Brushes.White, 2), user, 6, 6);
         MarkerLabel(context, "震中", origin + new Vector(12, -26), "#FFFFFF");
         MarkerLabel(context, "本地", user + new Vector(12, 8), "#C3FAFF");
-        context.DrawRectangle(Brush.Parse("#EF090C12"), null, new Rect(0, Bounds.Height - 58, Bounds.Width, 58));
-        Label(context, "P 波", new Point(14, Bounds.Height - 51), "#53D3E8", 13);
-        Label(context, "S 波", new Point(58, Bounds.Height - 51), "#FF6B79", 13);
-        var mode = loaded > 0 ? $"在线地图 Z{view.Zoom} · {_attribution}" : $"离线行政区底图 Z{view.Zoom} · Natural Earth";
-        Label(context, mode, new Point(104, Bounds.Height - 51), "#C2CCDC", 13);
-        Label(context, loaded > 0 || !_online ? "波前为传播示意 · 非台站实测" : _mapError is null ? "波前为传播示意 · 在线瓦片加载中" : "在线地图暂不可用，已使用离线地名", new Point(14, Bounds.Height - 28), "#C2CCDC", 13);
+        var mode = loaded > 0 ? $"在线 Z{view.Zoom} · {_attribution}"
+            : $"离线 Z{view.Zoom} · Natural Earth" + (_online ? (_mapError is null ? " · 加载中" : " · 在线地图不可用") : "");
+        var legend = $"P / S 波：传播示意，非实测  ·  {mode}";
+        if (_legend != legend)
+        {
+            _legend = legend;
+            Dispatcher.UIThread.Post(() => LegendChanged?.Invoke(legend));
+        }
     }
 
     private MapView View(AlertSnapshot snapshot)
@@ -255,7 +259,7 @@ public sealed class SeismicMap : Control
             var text = new FormattedText(label.Name, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
                 new Typeface("Microsoft YaHei UI"), level == 0 ? 20 : 15, Brush.Parse("#DCE8FA"));
             var rect = new Rect(point.X - text.Width / 2 - 3, point.Y - 11, text.Width + 6, 23);
-            if (rect.Left < 5 || rect.Right > Bounds.Width - 5 || rect.Top < 5 || rect.Bottom > Bounds.Height - 65
+            if (rect.Left < 5 || rect.Right > Bounds.Width - 5 || rect.Top < 5 || rect.Bottom > Bounds.Height - 5
                 || used.Any(old => old.Intersects(rect.Inflate(7)))) continue;
             used.Add(rect);
             context.DrawRectangle(Brush.Parse("#C9182538"), null, rect, 3, 3);

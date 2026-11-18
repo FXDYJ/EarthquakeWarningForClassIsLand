@@ -15,17 +15,14 @@ public static class CountdownSoundPlayer
     public static byte[] BuildWave(int number, int beeps)
     {
         var spoken = Numbers.GetOrAdd(number, LoadNumber);
-        var samples = new float[(int)(Rate * 0.9)];
-        // Keep the speech clear and reserve the end of the second for the familiar beep pattern.
-        var length = Math.Min(spoken.Length, (int)(Rate * 0.65));
-        for (var i = 0; i < length; i++)
-        {
-            var position = i * (spoken.Length - 1.0) / Math.Max(1, length - 1);
-            samples[i] = spoken[(int)position] * 0.9f;
-        }
+        var slot = number > 10 ? 1.94 : 0.94;
+        var samples = new float[(int)(Rate * slot)];
+        // Assets are authored to fit. Never truncate syllables or change pitch by resampling spoken numbers.
+        if (spoken.Length > Rate * (slot - 0.26)) throw new InvalidDataException("报数音频超出时隙");
+        for (var i = 0; i < spoken.Length; i++) samples[i + 240] = spoken[i] * 0.95f;
         for (var beep = 0; beep < Math.Clamp(beeps, 0, 2); beep++)
         {
-            var start = (int)(Rate * (0.71 + beep * 0.1));
+            var start = (int)(Rate * (slot - 0.23 + beep * 0.1));
             var count = (int)(Rate * 0.065);
             for (var i = 0; i < count; i++)
             {
@@ -37,6 +34,33 @@ public static class CountdownSoundPlayer
         using (var writer = new WaveFileWriter(output, WaveFormat.CreateIeeeFloatWaveFormat(Rate, 1)))
             writer.WriteSamples(samples, 0, samples.Length);
         return output.ToArray();
+    }
+
+    public static byte[] BuildWarningWave(int beeps, bool urgent = false)
+    {
+        var duration = urgent ? 0.35 : beeps >= 2 ? 1.2 : beeps == 1 ? 0.9 : 0.6;
+        var samples = new float[(int)(Rate * duration)];
+        double phase = 0;
+        for (var i = 0; i < samples.Length; i++)
+        {
+            var time = (double)i / Rate;
+            var sweep = (time % 0.3) / 0.3;
+            phase += 2 * Math.PI * (650 + 500 * sweep) / Rate;
+            var envelope = Math.Min(1, Math.Min(time / 0.02, (duration - time) / 0.05));
+            var pulse = (time % 0.3) < 0.25 ? 1.0 : 0.15;
+            samples[i] = (float)(0.40 * envelope * pulse * (Math.Sin(phase) + 0.15 * Math.Sin(phase * 2)));
+        }
+        using var stream = new MemoryStream();
+        using (var writer = new WaveFileWriter(stream, WaveFormat.CreateIeeeFloatWaveFormat(Rate, 1)))
+            writer.WriteSamples(samples, 0, samples.Length);
+        return stream.ToArray();
+    }
+
+    public static async Task PlayWarningAsync(int beeps, bool urgent, CancellationToken token)
+    {
+        using var stream = new MemoryStream(BuildWarningWave(beeps, urgent));
+        using var reader = new WaveFileReader(stream);
+        await PlayProviderAsync(reader, token);
     }
 
     public static async Task PlayAsync(int number, int beeps, CancellationToken token)
@@ -74,7 +98,9 @@ public static class CountdownSoundPlayer
 
     private static async Task PlayProviderAsync(IWaveProvider source, CancellationToken token)
     {
-        using var output = new WasapiOut(AudioClientShareMode.Shared, false, 40);
+        using var enumerator = new MMDeviceEnumerator();
+        using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+        using var output = new WasapiOut(device, AudioClientShareMode.Shared, false, 40);
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void Stopped(object? sender, StoppedEventArgs args)
         {

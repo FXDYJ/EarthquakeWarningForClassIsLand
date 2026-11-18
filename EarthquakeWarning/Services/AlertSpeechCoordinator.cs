@@ -17,8 +17,7 @@ public sealed class AlertSpeechCoordinator : IDisposable
     public void Start(Func<AlertSnapshot?> current, EarthquakeNotificationSettings settings)
     {
         Stop();
-        try { IAppHost.TryGetService<ISpeechService>()?.ClearSpeechQueue(); }
-        catch (Exception error) { Debug.WriteLine($"无法清空 CI 语音队列：{error.Message}"); }
+        ClearHostSpeech();
         var cancellation = new CancellationTokenSource();
         _session = cancellation;
         var previous = _running;
@@ -33,6 +32,12 @@ public sealed class AlertSpeechCoordinator : IDisposable
         });
     }
 
+    public static void ClearHostSpeech()
+    {
+        try { IAppHost.TryGetService<ISpeechService>()?.ClearSpeechQueue(); }
+        catch (Exception error) { Debug.WriteLine($"无法清空 CI 语音队列：{error.Message}"); }
+    }
+
     public void Stop()
     {
         var session = Interlocked.Exchange(ref _session, null);
@@ -43,7 +48,11 @@ public sealed class AlertSpeechCoordinator : IDisposable
     private async Task RunAsync(Func<AlertSnapshot?> current, EarthquakeNotificationSettings settings, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        using var boost = settings.BoostVolume ? SystemVolumeBoost.Acquire() : null;
+        var first = current();
+        if (first is null || !first.Event.Confirmed || !first.ModelSupported) return;
+        try { await CountdownSoundPlayer.PlayWarningAsync(first.Severity.Beeps, first.Remaining <= 6, token); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception error) { StatusChanged?.Invoke($"提示音不可用：{error.Message}"); }
         using var information = new SpeechSynthesizer();
         using var countdown = new SpeechSynthesizer();
         var voices = information.GetInstalledVoices().Where(voice => voice.Enabled
@@ -61,7 +70,7 @@ public sealed class AlertSpeechCoordinator : IDisposable
         countdown.SelectVoice(countdownVoice);
         information.Rate = 1;
         information.Volume = 90;
-        countdown.Rate = 3;
+        countdown.Rate = 1;
         countdown.Volume = 100;
         var simultaneous = settings.AllowConcurrentSpeech && (settings.UseRecordedCountdown || informationVoice != countdownVoice);
         var recordedCountdown = settings.UseRecordedCountdown;
@@ -76,8 +85,8 @@ public sealed class AlertSpeechCoordinator : IDisposable
         var opening = snapshot.Remaining <= 6
             ? $"{drill}地震预警，{instruction}。"
             : snapshot.Remaining <= 30
-            ? $"{drill}地震预警，{instruction}。接下来播报预计震动到达秒数。"
-            : $"{drill}地震预警，{snapshot.Report.PlaceName}发生{snapshot.Report.Magnitude.ToString("F1", CultureInfo.InvariantCulture)}级地震。{instruction}。短促语音播报预计震动到达秒数。";
+            ? $"{drill}地震预警，{instruction}，预计震动即将到达。"
+            : $"{drill}地震预警，{snapshot.Report.PlaceName}发生{snapshot.Report.Magnitude.ToString("F1", CultureInfo.InvariantCulture)}级地震。{instruction}，注意接下来的震动到达倒计时。";
         // Explanation is always completed before any numerical countdown starts.
         await SpeakAsync(information, opening, token);
         var nextInformation = DateTimeOffset.UtcNow;
@@ -110,7 +119,7 @@ public sealed class AlertSpeechCoordinator : IDisposable
                     continue; // Re-read the absolute arrival time after the information phrase.
                 }
             }
-            if (remaining != lastCount && (remaining <= 60 || remaining % 5 == 0))
+            if (remaining != lastCount && (remaining <= 60 ? remaining <= 10 || remaining % 2 == 0 : remaining % 5 == 0))
             {
                 var text = remaining <= 10 ? remaining.ToString(CultureInfo.InvariantCulture) : $"到达，{remaining}秒";
                 if (recordedCountdown && remaining is >= 1 and <= 60)
@@ -150,7 +159,9 @@ public sealed class AlertSpeechCoordinator : IDisposable
     {
         var snapshot = current();
         if (snapshot is null) return;
-        await CountdownSoundPlayer.PlayAnnouncementAsync(snapshot.Drill ? "intro-drill" : "intro", token);
+        var intro = snapshot.Remaining <= 6 ? (snapshot.Drill ? "intro-urgent-drill" : "intro-urgent")
+            : snapshot.Drill ? "intro-drill" : "intro";
+        await CountdownSoundPlayer.PlayAnnouncementAsync(intro, token);
         var last = int.MaxValue;
         while (!token.IsCancellationRequested)
         {
@@ -158,7 +169,7 @@ public sealed class AlertSpeechCoordinator : IDisposable
             if (snapshot is null || !snapshot.Event.Confirmed) return;
             var remaining = (int)Math.Ceiling(snapshot.Remaining);
             if (remaining <= 0) break;
-            if (remaining <= 60 && remaining != last)
+            if (remaining <= 60 && remaining != last && (remaining <= 10 || remaining % 2 == 0))
             {
                 await CountdownSoundPlayer.PlayAsync(remaining, snapshot.Severity.Beeps, token);
                 last = remaining;

@@ -4,12 +4,6 @@ public static class HuaniaEarthQuakeCalculator
 {
     private const double EARTH_RADIUS = 6378.137d;
 
-    private static readonly double[] SLOPE =
-        [0.23335281, 0.23347212, 0.23335606, 0.23335613, 0.23335539, 0.23335367, 0.23335291f];
-
-    private static readonly double[] INTERCEPT =
-        [8.567052, 7.5333714, 6.667651, 8.562906, 7.877903, 7.191011, 6.5055184f];
-
     private static readonly double[][] ARRAY =
     [
         [
@@ -114,7 +108,7 @@ public static class HuaniaEarthQuakeCalculator
 
     /// <summary>
     /// 基于汪素云等（2000）中国分区烈度衰减关系估算本地烈度。
-    /// 以震中经度 105°E 划分东、西部，用震源距纳入深度影响；
+    /// 以震中经度 105°E 划分东、西部，R 严格使用震中距（非震源距）；
     /// 在缺少断层走向信息时取长、短轴结果的平均值作为方位平均估计。
     /// </summary>
     /// <param name="magnitude">震级</param>
@@ -123,21 +117,19 @@ public static class HuaniaEarthQuakeCalculator
     /// <param name="epicenterLongitude">震中经度</param>
     public static double GetIntensity(double magnitude, double epicentralDistance, double? depth, double epicenterLongitude)
     {
-        if (!double.IsFinite(magnitude) || !double.IsFinite(epicentralDistance) || epicentralDistance < 0)
+        if (!double.IsFinite(magnitude) || magnitude is < 4 or > 8.5
+            || !double.IsFinite(epicentralDistance) || epicentralDistance is < 0 or > 500
+            || !double.IsFinite(epicenterLongitude) || depth is not > 0 or > 30)
         {
-            return 0.0;
+            return double.NaN;
         }
-
-        var depthKm = depth is > 0.0 and < 1000.0 ? depth.Value : 10.0;
-        // 震源距：深源地震在地表的震动弱于同震中距的浅源地震。
-        var hypocentralDistance = Math.Sqrt(epicentralDistance * epicentralDistance + depthKm * depthKm);
 
         double aLong, aShort, b, cLong, cShort, r0Long, r0Short;
         if (epicenterLongitude >= 105.0)
         {
             // 中国东部
             aLong = 5.019; b = 1.446; cLong = 4.136; r0Long = 24.0;
-            aShort = 2.240; cShort = 3.070; r0Short = 9.0;
+            aShort = 2.240; cShort = 3.071; r0Short = 9.0;
         }
         else
         {
@@ -146,48 +138,38 @@ public static class HuaniaEarthQuakeCalculator
             aShort = 2.019; cShort = 2.943; r0Short = 8.0;
         }
 
-        var longAxis = aLong + b * magnitude - cLong * Math.Log10(hypocentralDistance + r0Long);
-        var shortAxis = aShort + b * magnitude - cShort * Math.Log10(hypocentralDistance + r0Short);
+        var longAxis = aLong + b * magnitude - cLong * Math.Log10(epicentralDistance + r0Long);
+        var shortAxis = aShort + b * magnitude - cShort * Math.Log10(epicentralDistance + r0Short);
         return Math.Clamp((longAxis + shortAxis) / 2.0, 0.0, 12.0);
     }
 
     public static double GetIntensity(double magnitude, double distance)
     {
-        return GetIntensity(magnitude, distance, null, 105.0);
+        return double.NaN; // No defensible depth/region supplied by this legacy overload.
     }
 
     public static double GetCountDownSeconds(double depth, double distance)
     {
-        if (!double.IsFinite(depth) || !double.IsFinite(distance) || depth < 0.0 || distance < 0.0)
+        if (!double.IsFinite(depth) || !double.IsFinite(distance) || depth is < 0 or > 30 || distance is < 0 or > 500)
         {
-            return 0.0;
+            return double.NaN;
         }
-        var i = (int)(depth / 5.0f);
-        if (i > 6)
-        {
-            i = 6;
-        }
-        var fArr = ARRAY;
-        var i2 = 0;
-        var fArr2 = fArr[0];
-        var fArr3 = fArr[i + 1];
-        var length = fArr2.Length - 1;
-        if (distance > fArr2[length])
-        {
-            return SLOPE[i] * distance + INTERCEPT[i];
-        }
-        if (distance >= fArr2[length])
-        {
-            return fArr3[^1];
-        }
-        while (i2 < length && distance >= fArr2[i2])
-        {
-            i2++;
-        }
-        var i3 = i2 - 1;
-        var i4 = i3 + 1;
-        return fArr3[i3] + (fArr3[i4] - fArr3[i3]) * ((distance - fArr2[i3]) / (fArr2[i4] - fArr2[i3]));
+        var low = Math.Min((int)(depth / 5), 6);
+        var high = Math.Min(low + 1, 6);
+        var fraction = (depth - low * 5) / 5;
+        var lower = InterpolateDistance(low + 1, distance);
+        return lower + (InterpolateDistance(high + 1, distance) - lower) * fraction;
+    }
 
+    private static double InterpolateDistance(int row, double distance)
+    {
+        var axis = ARRAY[0];
+        var index = Array.BinarySearch(axis, distance);
+        if (index >= 0) return ARRAY[row][index];
+        var upper = ~index;
+        var lower = upper - 1;
+        var fraction = (distance - axis[lower]) / (axis[upper] - axis[lower]);
+        return ARRAY[row][lower] + (ARRAY[row][upper] - ARRAY[row][lower]) * fraction;
     }
 
     public static double GetDistance(double latitude1, double longitude1, double latitude2, double longitude2)

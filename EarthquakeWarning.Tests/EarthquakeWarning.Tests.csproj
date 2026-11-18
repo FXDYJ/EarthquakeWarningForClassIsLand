@@ -7,5 +7,6 @@
     <Compile Include="../EarthquakeWarning/Services/Feeds/ConsensusEngine.cs" Link="ConsensusEngine.cs"/>
     <Compile Include="../EarthquakeWarning/Services/Feeds/SeismicParser.cs" Link="SeismicParser.cs"/>
     <Compile Include="../EarthquakeWarning/Calculators/HuaniaEarthquakeCalculator.cs" Link="HuaniaEarthquakeCalculator.cs"/>
+    <Compile Include="../EarthquakeWarning/Calculators/MainlandRegion.cs" Link="MainlandRegion.cs"/>
   </ItemGroup>
 </Project>

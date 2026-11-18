@@ -48,10 +48,9 @@
                     </Grid>
                     <StackPanel Grid.Row="4" Spacing="10" VerticalAlignment="Bottom" Margin="0,20,0,20">
                         <TextBlock Text="{Binding EventDetails}" FontSize="15" Foreground="#A4B3CB" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding VoiceStatus}" FontSize="14" Foreground="#A4B3CB" TextWrapping="Wrap" MaxHeight="50"/>
                     </StackPanel>
                 </Grid>
-                <Grid Grid.Column="1" RowDefinitions="330,Auto,*">
+                <Grid Grid.Column="1" RowDefinitions="330,Auto,Auto,*">
                     <Border Background="#111A27" ClipToBounds="True">
                         <Grid>
                             <local:SeismicMap x:Name="WaveMap"/>
@@ -62,11 +61,12 @@
                             </StackPanel>
                         </Grid>
                     </Border>
-                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,18,0,10">
+                    <TextBlock Grid.Row="1" x:Name="MapLegend" FontSize="13" Foreground="#B4BECF" Margin="0,7,0,0" TextWrapping="Wrap"/>
+                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,10">
                         <TextBlock Text="接口交叉核验" FontSize="24" FontWeight="SemiBold"/>
                         <TextBlock Grid.Column="1" Text="接口可能共享同一上游" FontSize="16" Foreground="#B4BECF" VerticalAlignment="Center"/>
                     </Grid>
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding Evidence}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>

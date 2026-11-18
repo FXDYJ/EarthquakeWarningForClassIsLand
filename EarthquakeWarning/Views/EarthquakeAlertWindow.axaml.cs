@@ -23,6 +23,7 @@ public partial class EarthquakeAlertWindow : Window
         _mute = mute;
         _settings = settings ?? new();
         InitializeComponent();
+        WaveMap.LegendChanged += text => MapLegend.Text = text;
         DataContext = Model;
         _timer.Tick += (_, _) => Refresh();
         Opened += (_, _) => { Refresh(); _timer.Start(); };
