@@ -1,0 +1,73 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:EarthquakeWarning.Views" x:Class="EarthquakeWarning.Views.StationMonitorWindow"
+        Title="TREM 台站观测" Width="1360" Height="860" MinWidth="960" MinHeight="620"
+        Background="#090C12" Foreground="#F3F5F8" FontFamily="Microsoft YaHei UI, Segoe UI">
+    <Window.Styles>
+        <Style Selector="Button"><Setter Property="Background" Value="#242B37"/><Setter Property="Foreground" Value="#F3F5F8"/><Setter Property="Padding" Value="12,7"/></Style>
+        <Style Selector="Button:focus-visible"><Setter Property="BorderBrush" Value="#F3F5F8"/><Setter Property="BorderThickness" Value="2"/></Style>
+    </Window.Styles>
+    <Grid RowDefinitions="Auto,*,Auto" Margin="20" RowSpacing="14">
+        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+            <StackPanel Orientation="Horizontal" Spacing="14">
+                <TextBlock Text="TREM 台站观测" FontSize="28" FontWeight="Bold"/>
+                <Border IsVisible="{Binding IsSimulation}" BorderBrush="#FFBD66" BorderThickness="1" Padding="8,4" VerticalAlignment="Center">
+                    <TextBlock Text="演练 · 模拟台站数据" Foreground="#FFBD66" FontSize="14"/>
+                </Border>
+            </StackPanel>
+            <Button Grid.Column="1" Content="关闭 · Esc" Click="CloseClick" VerticalAlignment="Top"/>
+            <TextBlock Grid.Row="1" Text="{Binding Status}" FontSize="18" Foreground="#7CE9F5" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="台湾地区台站观测 · 与中国本地预估烈度分开 · 不参与预警触发" FontSize="14" Foreground="#B4BECF" Margin="0,5,0,0" TextWrapping="Wrap"/>
+        </Grid>
+        <Grid Grid.Row="1" ColumnDefinitions="*,342" ColumnSpacing="18">
+            <Grid RowDefinitions="*,Auto">
+                <Border Background="#111A27" ClipToBounds="True"><local:SeismicMap x:Name="StationMap"/></Border>
+                <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+                    <TextBlock x:Name="MapLegend" Foreground="#B4BECF" FontSize="12" TextWrapping="Wrap" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                        <Button Content="放大" Click="ZoomIn"/><Button Content="缩小" Click="ZoomOut"/><Button Content="全部台站" Click="FitStations"/>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+            <Border Grid.Column="1" Background="#111722" Padding="14">
+                <Grid RowDefinitions="Auto,Auto,*">
+                    <TextBlock Text="观测值" FontSize="22" FontWeight="SemiBold"/>
+                    <Grid Grid.Row="1" ColumnDefinitions="*,58,76" Margin="0,12,0,8">
+                        <TextBlock Text="设备 / 位置" FontSize="13" Foreground="#B4BECF"/>
+                        <TextBlock Grid.Column="1" Text="震度¹" FontSize="13" Foreground="#B4BECF"/>
+                        <TextBlock Grid.Column="2" Text="PGA · gal" FontSize="13" Foreground="#B4BECF"/>
+                    </Grid>
+                    <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Rows}">
+                            <ItemsControl.ItemTemplate><DataTemplate>
+                                <Border BorderBrush="#2B3445" BorderThickness="0,0,0,1" Padding="0,9">
+                                    <Grid ColumnDefinitions="*,58,76" RowDefinitions="Auto,Auto,Auto">
+                                        <TextBlock Text="{Binding Id}" FontSize="15" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Intensity}" FontSize="16" Foreground="{Binding Color}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Pga}" FontSize="15"/>
+                                        <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding Location}" FontSize="11" Foreground="#B4BECF" Margin="0,4,0,0"/>
+                                        <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Text="{Binding Status}" FontSize="12" Foreground="#B4BECF" Margin="0,3,0,0"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="2" Text="{Binding EmptyMessage}" IsVisible="{Binding HasNoStations}" FontSize="15" Foreground="#B4BECF" TextWrapping="Wrap" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="12"/>
+                </Grid>
+            </Border>
+        </Grid>
+        <StackPanel Grid.Row="2" Spacing="4">
+            <TextBlock Text="{Binding Detail}" FontSize="12" Foreground="#B4BECF" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding DirectoryStatus}" FontSize="12" Foreground="#B4BECF" TextWrapping="Wrap"/>
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBlock Text="震度¹" FontSize="12" Foreground="#B4BECF"/>
+                <TextBlock Text="0" FontSize="12" Foreground="#8AB5CC"/><TextBlock Text="1" FontSize="12" Foreground="#65CBF3"/>
+                <TextBlock Text="2" FontSize="12" Foreground="#7ED9B1"/><TextBlock Text="3" FontSize="12" Foreground="#FFE08A"/>
+                <TextBlock Text="4" FontSize="12" Foreground="#FFBD66"/><TextBlock Text="5弱 / 强" FontSize="12" Foreground="#FF8C68"/>
+                <TextBlock Text="6弱 / 强" FontSize="12" Foreground="#FF6B79"/><TextBlock Text="7" FontSize="12" Foreground="#F2B0EA"/>
+                <TextBlock Text="灰色 / —：未知" FontSize="12" Foreground="#9EABC1"/>
+            </StackPanel>
+            <TextBlock Text="¹ TREM 原始观测震度标度，非中国烈度；PGA 为 0.5 秒内三轴矢量和峰值。仅有震动指标，不含原始波形。" FontSize="12" Foreground="#B4BECF" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Attribution}" FontSize="12" Foreground="#B4BECF" TextWrapping="Wrap"/>
+        </StackPanel>
+    </Grid>
+</Window>

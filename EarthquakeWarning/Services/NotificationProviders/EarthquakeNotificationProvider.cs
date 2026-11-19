@@ -7,6 +7,7 @@ using ClassIsland.Core.Models.Notification;
 using EarthquakeWarning.Calculators;
 using EarthquakeWarning.Models;
 using EarthquakeWarning.Services.Feeds;
+using EarthquakeWarning.Services.Stations;
 using EarthquakeWarning.Views;
 using Microsoft.Extensions.Hosting;
 using System.Diagnostics;
@@ -18,6 +19,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
 {
     private readonly CancellationTokenSource _shutdown = new();
     private readonly SeismicSourceService _feeds = new();
+    private readonly TremStationService _stations = new();
     private readonly AlertSpeechCoordinator _speech = new();
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly Dictionary<string, DateTimeOffset> _shown = new();
@@ -28,6 +30,9 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
     private readonly HashSet<string> _muted = new();
     private readonly IDisposable _stopRegistration;
     private Task _monitor = Task.CompletedTask;
+    private Task _stationMonitor = Task.CompletedTask;
+    private volatile bool _stationEnabled;
+    private StationMonitorWindow? _stationWindow;
     private volatile string _mode = "combined";
     private volatile bool _enabled = true;
     private AlertSnapshot? _active;
@@ -51,10 +56,50 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
             if (_shutdown.IsCancellationRequested) return;
             _mode = NormalizeMode(Settings.SourceMode);
             _enabled = Settings.MonitoringEnabled;
+            _stationEnabled = _enabled && Settings.EnableStationMonitoring;
             _timer.Tick += Tick;
             _timer.Start();
             _monitor = Task.Run(MonitorSelectionAsync);
+            _stationMonitor = Task.Run(MonitorStationsAsync);
         });
+    }
+
+    private async Task MonitorStationsAsync()
+    {
+        try
+        {
+            while (!_shutdown.IsCancellationRequested)
+            {
+                if (!_stationEnabled) { await Task.Delay(250, _shutdown.Token); continue; }
+                using var source = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+                var run = _stations.RunAsync(source.Token);
+                try
+                {
+                    while (_stationEnabled && !run.IsCompleted) await Task.Delay(250, _shutdown.Token);
+                }
+                finally
+                {
+                    source.Cancel();
+                    await run;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            Debug.WriteLine(error);
+            _stations.Store.Change(state => state with { Connected = false, Status = $"台站观测停止：{error.Message}" });
+        }
+    }
+
+    public void OpenStationMonitor()
+    {
+        if (_disposed != 0) return;
+        if (_stationWindow is not null) { _stationWindow.Topmost = _window is not null; _stationWindow.Activate(); return; }
+        _stationWindow = new StationMonitorWindow(() => _stations.Snapshot, Settings);
+        _stationWindow.Topmost = _window is not null;
+        _stationWindow.Closed += (_, _) => _stationWindow = null;
+        _stationWindow.Show();
     }
 
     private async Task MonitorSelectionAsync()
@@ -97,6 +142,9 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
     private void Evaluate()
     {
         if (_disposed != 0 || _shutdown.IsCancellationRequested) return;
+        _stationEnabled = Settings.MonitoringEnabled && Settings.EnableStationMonitoring;
+        Settings.StationStatus = _stations.Snapshot.Summary(DateTimeOffset.UtcNow);
+        if (_stations.Snapshot.DirectoryError.Length > 0) Settings.StationStatus += " · " + _stations.Snapshot.DirectoryError;
         var mode = NormalizeMode(Settings.SourceMode);
         if (_mode != mode || _enabled != Settings.MonitoringEnabled)
         {
@@ -206,7 +254,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         {
             if (Settings.EnableFullScreen && _window is null)
             {
-                _window = new EarthquakeAlertWindow(() => Volatile.Read(ref _active), Mute, Settings);
+                _window = new EarthquakeAlertWindow(() => Volatile.Read(ref _active), Mute, Settings, () => _stations.Snapshot, OpenStationMonitor);
                 _window.Model.VoiceStatus = Settings.SpeechStatus;
                 _window.Closed += WindowClosed;
                 _window.ShowOnClassIslandScreen();
@@ -322,6 +370,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
 
     private void WindowClosed(object? sender, EventArgs args)
     {
+        if (_stationWindow is not null) _stationWindow.Topmost = false;
         if (_active is not null) _dismissed.Add(_active.EventKey);
         _window = null;
         _speech.Stop();
@@ -340,6 +389,7 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
     private void CloseWindow()
     {
         if (_window is null) return;
+        if (_stationWindow is not null) _stationWindow.Topmost = false;
         _window.Closed -= WindowClosed;
         _window.Close();
         _window = null;
@@ -365,14 +415,14 @@ public class EarthquakeNotificationProvider : NotificationProviderBase<Earthquak
         _speech.Dispose();
         ReleaseAudioFocus();
         _stopRegistration.Dispose();
-        Dispatcher.UIThread.Post(() => { _timer.Stop(); CloseActive(); });
+        Dispatcher.UIThread.Post(() => { _timer.Stop(); CloseActive(); _stationWindow?.Close(); });
         _ = ReleaseAsync();
         if (Current == this) Current = null;
     }
 
     private async Task ReleaseAsync()
     {
-        try { await _monitor; }
-        finally { _feeds.Dispose(); _shutdown.Dispose(); }
+        try { await Task.WhenAll(_monitor, _stationMonitor); }
+        finally { _feeds.Dispose(); _stations.Dispose(); _shutdown.Dispose(); }
     }
 }

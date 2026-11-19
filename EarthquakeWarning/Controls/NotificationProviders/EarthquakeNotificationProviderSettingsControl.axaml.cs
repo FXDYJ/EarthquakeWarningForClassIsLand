@@ -43,6 +43,13 @@ public partial class EarthquakeNotificationProviderSettingsControl : Notificatio
         else provider.StartDrill();
     }
 
+    private void OpenStations(object? sender, RoutedEventArgs e)
+    {
+        var provider = EarthquakeNotificationProvider.Current;
+        if (provider is null) { Settings.StationStatus = "提醒提供方尚未启动，请稍后重试"; return; }
+        provider.OpenStationMonitor();
+    }
+
     private async void btnLocate_Click(object? sender, RoutedEventArgs e)
     {
         btnLocate.IsEnabled = false;

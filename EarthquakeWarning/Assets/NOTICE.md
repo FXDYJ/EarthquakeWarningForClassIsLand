@@ -12,6 +12,11 @@ Countdown WAV assets are pre-generated Microsoft Xiaoxiao neutral female neural 
 - https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_50m_populated_places.geojson
 - https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_110m_admin_0_countries.geojson
 
-The map displays geographic outlines and estimated wave propagation. It contains no real-time station observations.
+The geographic basemap and estimated wave propagation are separate from the optional real-time station overlay.
+
+Real-time station observations: ExpTech Studio TREM (https://exptech.dev). Non-commercial use only. Unofficial information; the Central Weather Administration's releases prevail. The TREM-net feed covers its own stations, mainly in Taiwan, and is not a Chinese mainland dense warning-station feed. Its instrumental intensity scale is not Chinese local estimated intensity. Observations never confirm an event or trigger alert actions in this plugin. Deployment of this data feature is subject to the provider's data terms, independently of this repository's code license.
+- https://exptech.dev/en/docs/api/start/license/
+- https://exptech.dev/en/docs/api/stream/rts/
+- https://exptech.dev/en/docs/api/stream/station/
 
 The conservative mainland model coverage gate is derived from Natural Earth ne_110m_admin_0_countries, public domain. It is a coarse computation gate, not an administrative boundary service.

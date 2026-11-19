@@ -31,6 +31,11 @@ colors:
   map-p-wave: "#53D3E8"
   map-s-wave: "#FF6B79"
   map-local: "#7CE9F5"
+  station-zero: "#8AB5CC"
+  station-two: "#7ED9B1"
+  station-three: "#FFE08A"
+  station-five: "#FF8C68"
+  station-seven: "#F2B0EA"
 typography:
   display:
     fontFamily: "Bahnschrift, Microsoft YaHei UI"
@@ -72,6 +77,16 @@ typography:
   action:
     fontFamily: "Microsoft YaHei UI, Segoe UI"
     fontSize: "18px"
+  station-title:
+    fontFamily: "Microsoft YaHei UI, Segoe UI"
+    fontSize: "28px"
+    fontWeight: 700
+  station-reading:
+    fontFamily: "Microsoft YaHei UI, Segoe UI"
+    fontSize: "16px"
+  station-caption:
+    fontFamily: "Microsoft YaHei UI, Segoe UI"
+    fontSize: "12px"
 rounded:
   map-label: "3px"
 spacing:
@@ -110,6 +125,14 @@ components:
     width: "282px"
   map-panel:
     backgroundColor: "{colors.map-background}"
+  station-action:
+    backgroundColor: "{colors.button}"
+    textColor: "{colors.foreground}"
+    padding: "7px 12px"
+  station-readings:
+    backgroundColor: "{colors.panel}"
+    padding: "14px"
+    width: "342px"
 ---
 
 # Design System: EarthquakeWarning for ClassIsland
@@ -129,6 +152,7 @@ components:
 - 蓝、琥珀、红三档颜色与无滴、单滴、双滴声音保持对应。
 - 待核验、分歧、过期、模型不支持、撤销与演练有明确身份和状态文字。
 - 地图和接口证据是解释信息，传播波前明确标为估算示意。
+- TREM 台站以方形与观测读数形成独立辅助层，沿用现有深色表面，不争夺避险动作层级。
 
 ## Colors
 
@@ -147,6 +171,8 @@ components:
 ### Secondary
 
 地图用青色 P 波、粉红色 S 波、红色震中点和浅青色本地点。虚线连接震中与本地，白色轮廓保证点位辨认；这些颜色不改变事件严重度。
+
+台站观测颜色来自 `Models/StationMonitorViewModel.cs` 的 `StationPalette`：0 使用 `station-zero`，1 复用 `weak-accent`，2 使用 `station-two`，3 使用 `station-three`，4 复用 `felt-accent`，5弱/强使用 `station-five`，6弱/强复用 `map-s-wave`，7 使用 `station-seven`；未知复用 `publisher`。这组颜色只编码 TREM 原始观测震度，与中国本地预估烈度及警报主题分开，始终配合数值、状态与标度说明。
 
 ### Neutral
 
@@ -167,6 +193,8 @@ components:
 - 底部建议为 guidance，三步行动标题为 safety-step，行动详情为 16，次要建议为 17。
 - 到达阶段为 22，接收证据标题为 23；接口名与状态为 16，参数为 15，展开详情为 14，发布机构与页脚为 13；地图外图例为 12。
 
+独立台站窗口标题为 station-title（28），连接状态为 18，观测值分区标题为 22；设备/PGA 为 15，震度为 station-reading（16），位置为 11，状态、图例、时标及署名为 station-caption（12），列标题为 13。
+
 不建立未实现的全局行高、字距或强制文本长度规范；设置页字号继续跟随宿主主题。
 
 ## Layout
@@ -180,6 +208,8 @@ components:
 行动带内边距为左/右 28、上/下 18，左侧建议区宽 390，右侧均分三步动作；图标和短动词共同支持远距离辨认。页脚显示模型估算提示与北京时间。预测状态变化不挤走中央地图和右侧证据。
 
 设置页是一列纵向 `ScrollViewer`，分组内采用 `SettingsExpander` / `SettingsExpanderItem`。数值输入宽 150，来源选择宽 250，音色、地图地址、署名和命令输入宽 260；表单外观由宿主主题控制。
+
+独立台站窗口默认 1360 × 860，最小 960 × 620，保留原生窗口装饰；不使用警报窗的 Viewbox 缩放。外边距为 20，三行之间间距为 14；顶部放标题、连接/时标、范围说明和关闭按钮，中部左侧地图伸展、右侧读数栏固定宽 342，列间距为 18。右栏内边距为 14，列表纵向滚动；地图外下方放图例、放大/缩小和“全部台站”。底部保留目录状态、观测标度、PGA 定义与数据署名，在 4:3 和较小窗口中保持分区。
 
 ## Elevation & Depth
 
@@ -211,6 +241,16 @@ components:
 
 原生“放大”“缩小”按钮和滚轮改变缩放级别，左键拖动平移，“复位”恢复适合震中与本地的初始视图，悬停提示该含义。绝对缩放范围为 Z2–18；切换事件重置视图。仅在模型支持且事件已确认时绘制 P/S 传播圆环；其他状态移除波圈，震中点改用参考色并标“待核验震中”，图例改为“预测暂停 · 仅显示参考位置”。
 
+### 台站观测
+
+`StationMonitorWindow` 沿用原生 Button，中性深灰背景和浅色文字，内边距为 7 × 12，键盘焦点使用 2 单位浅色边框；按钮半径和交互继续由 Avalonia 主题控制。Esc 或“关闭 · Esc”只关闭观测窗口。地图支持原有缩放、滚轮和平移，“全部台站”恢复台网覆盖视图。
+
+活动目录台站绘制为 8 × 8 方形，近黑描边为 1.5，与圆形震中/本地标记区分；来源检测中的有效震度额外显示小圆环，但不表示预警确认。悬停显示设备、楼层、观测震度、PGA 和时标；过期或掉线后提示无有效观测。读数列表按设备编号稳定排列，保留设备/坐标/楼层、震度、PGA 和文字状态，使用细分隔线，不增加卡片。
+
+未知震度用灰色和破折号，缺失 PGA 用破折号，真实零值仍显示；超过五秒有效窗口或掉线时清空当前读数。目录未就绪显示等待/失败说明与空列表；保留上次有效目录时持续显示目录错误，不能把坐标目录当作实时在线状态。模拟观测窗口持续显示“演练 · 模拟台站数据”描边徽标，独立观测窗口默认展示真实观测。
+
+预警窗口地图外新增 TREM 状态、署名和“台站”入口；观测只提供辅助展示，不改变三列、避险动作、核验证据或声音分档。演练预警不叠加无关实时台站。
+
 ### 核验证据
 
 右栏始终显示接口/数据流、吻合/待核验/分歧/已撤销状态、震级与深度，不因折叠详情而隐藏证据行。D 或“报文详情 · D”展开地点、报次、发布机构与发震时间，再次操作显示“收起详情 · D”。新事件默认折叠，若进入分歧、过期、证据不足或模型不支持等暂停状态则自动展开；用户仍可手动收起。
@@ -219,7 +259,7 @@ components:
 
 ### 设置与反馈
 
-原生展开分组覆盖监测开关、来源选择、确认后全屏、接口连接详情、最近震情、自动定位/经纬度、提醒阈值、在线地图、语音及播报阈值、外部命令和演练。自动定位失败使用可关闭的 Warning InfoBar；核验机制说明使用不可关闭的 Informational InfoBar。
+原生展开分组覆盖监测开关、来源选择、确认后全屏、接口连接详情、最近震情、自动定位/经纬度、提醒阈值、在线地图、语音及播报阈值、外部命令和演练；新增“台站观测（TREM）”分组，包含默认开启的独立开关、状态与“查看台站地图与观测值”入口。自动定位失败使用可关闭的 Warning InfoBar；核验机制说明使用不可关闭的 Informational InfoBar。
 
 语音、命令关闭时，其相关阈值或命令字段禁用。提醒阈值与播报阈值分别配置；三档样式不改变这两个阈值的意义。演练按钮在运行时显示“停止演练”，演练屏蔽外部命令。
 
@@ -232,10 +272,12 @@ components:
 - **Do** 保留 D 详情、M 静音、Esc 关闭、地图复位和证据滚动等现有操作。
 - **Do** 在暂停预测时移除有效数字和波圈，在预计到达后继续给出防护动作。
 - **Do** 将宿主设置主题与全屏专用样式分开记录。
+- **Do** 在台站观测中持续显示原始标度、台湾覆盖、非官方及非商业署名，未知读数使用灰色与破折号。
 
 ### Don't:
 
 - **Don't** 把同一网关的不同数据流或 HTTP/推送计算成两个独立确认接口。
 - **Don't** 将估算波前、三档影响名称或在线瓦片标签描述为台站实测或确定结果。
 - **Don't** 添加快速闪烁、虚构台站、可信度百分比、伪装饰读数或预测结束时间。
+- **Don't** 将 TREM 观测震度、来源检测环或台站数量用于本地烈度替代、事件核验或预警动作。
 - **Don't** 将原生无头截图与回归结果描述为真实教室、真实多屏或真实地震验收。

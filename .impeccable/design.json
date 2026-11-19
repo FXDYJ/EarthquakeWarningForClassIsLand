@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-19T05:41:45+08:00",
+  "generatedAt": "2026-11-19T12:39:42+08:00",
   "title": "Design System: EarthquakeWarning for ClassIsland",
   "extensions": {
     "colorMeta": {
@@ -19,6 +19,26 @@
       "background": {
         "role": "neutral",
         "displayName": "近黑工作区"
+      },
+      "station-zero": {
+        "role": "secondary",
+        "displayName": "TREM 观测震度0"
+      },
+      "station-two": {
+        "role": "secondary",
+        "displayName": "TREM 观测震度2"
+      },
+      "station-three": {
+        "role": "secondary",
+        "displayName": "TREM 观测震度3"
+      },
+      "station-five": {
+        "role": "secondary",
+        "displayName": "TREM 观测震度5"
+      },
+      "station-seven": {
+        "role": "secondary",
+        "displayName": "TREM 观测震度7"
       }
     },
     "typographyMeta": {
@@ -29,6 +49,18 @@
       "caption": {
         "displayName": "辅助说明",
         "purpose": "时间、单位、估算说明与参数标签。"
+      },
+      "station-title": {
+        "displayName": "台站窗口标题",
+        "purpose": "原生独立观测窗口标题。"
+      },
+      "station-reading": {
+        "displayName": "台站观测震度",
+        "purpose": "来源原始标度，非中国本地预估烈度。"
+      },
+      "station-caption": {
+        "displayName": "台站辅助说明",
+        "purpose": "连接、目录、PGA 定义、时标及数据署名。"
       }
     },
     "nativePlatform": {
@@ -37,7 +69,14 @@
       "designCanvas": "1600x900; FitCanvas expands the extra dimension",
       "layout": "342 / flexible map / 282; rows 88 / flexible / 136 / 34",
       "components": "Native Button and ToggleButton; no HTML/CSS runtime or fabricated web samples",
-      "review": "13 headless rendered states; physical classroom and multi-monitor behavior not verified"
+      "review": "23 headless rendered frames (10 station/settings, 13 alert compatibility); physical classroom and multi-monitor behavior not verified",
+      "stationObservation": {
+        "source": "EarthquakeWarning/Views/StationMonitorWindow.axaml",
+        "defaultWindow": "1360x860",
+        "minimumWindow": "960x620",
+        "layout": "flexible map / 342 readings; 20 inset; 18 column gap; no Viewbox",
+        "markers": "8x8 squares; original TREM instrumental intensity; grey is unknown"
+      }
     }
   },
   "components": [],
@@ -49,7 +88,8 @@
       "中央地图独立伸展，接收证据常显，图例和操作不遮住地图。",
       "蓝、琥珀、红三档颜色与无滴、单滴、双滴声音保持对应。",
       "待核验、分歧、过期、模型不支持、撤销与演练有明确身份和状态文字。",
-      "地图和接口证据是解释信息，传播波前明确标为估算示意。"
+      "地图和接口证据是解释信息，传播波前明确标为估算示意。",
+      "TREM 台站以方形与观测读数形成独立辅助层，沿用现有深色表面，不争夺避险动作层级。"
     ],
     "rules": [
       {
@@ -63,12 +103,14 @@
       "Do 保持中央地图和右侧接收证据独立可见，图例与操作放在地图外。",
       "Do 保留 D 详情、M 静音、Esc 关闭、地图复位和证据滚动等现有操作。",
       "Do 在暂停预测时移除有效数字和波圈，在预计到达后继续给出防护动作。",
-      "Do 将宿主设置主题与全屏专用样式分开记录。"
+      "Do 将宿主设置主题与全屏专用样式分开记录。",
+      "Do 在台站观测中持续显示原始标度、台湾覆盖、非官方及非商业署名，未知读数使用灰色与破折号。"
     ],
     "donts": [
       "Don't 把同一网关的不同数据流或 HTTP/推送计算成两个独立确认接口。",
       "Don't 将估算波前、三档影响名称或在线瓦片标签描述为台站实测或确定结果。",
       "Don't 添加快速闪烁、虚构台站、可信度百分比、伪装饰读数或预测结束时间。",
+      "Don't 将 TREM 观测震度、来源检测环或台站数量用于本地烈度替代、事件核验或预警动作。",
       "Don't 将原生无头截图与回归结果描述为真实教室、真实多屏或真实地震验收。"
     ]
   }

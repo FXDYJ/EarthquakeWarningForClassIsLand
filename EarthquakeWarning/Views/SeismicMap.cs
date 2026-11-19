@@ -34,6 +34,11 @@ public sealed class SeismicMap : Control
     private string? _mapError;
     private DateTimeOffset _retryAfter;
     private string _legend = "";
+    private StationNetworkState _stations = StationNetworkState.Disabled;
+    private bool _stationOverview;
+    private readonly List<(Point Position, StationMetadata Station, StationReading? Reading)> _stationHits = new();
+    private string? _hoveredStation;
+    private Point? _stationPointer;
     public event Action<string>? LegendChanged;
 
     public SeismicMap()
@@ -58,7 +63,7 @@ public sealed class SeismicMap : Control
         };
         PointerMoved += (_, args) =>
         {
-            if (_drag is not { } start || _snapshot is null) return;
+            if (_drag is not { } start) { _stationPointer = args.GetPosition(this); UpdateStationTooltip(_stationPointer.Value); return; }
             var size = View(_snapshot).WorldSize;
             var delta = args.GetPosition(this) - start;
             _panX = _dragX - delta.X / size; _panY = _dragY - delta.Y / size;
@@ -66,6 +71,7 @@ public sealed class SeismicMap : Control
         };
         PointerReleased += (_, args) => { _drag = null; args.Pointer.Capture(null); };
         PointerCaptureLost += (_, _) => _drag = null;
+        PointerExited += (_, _) => { _stationPointer = null; _hoveredStation = null; ToolTip.SetTip(this, null); };
     }
 
     public void Configure(EarthquakeNotificationSettings settings)
@@ -92,14 +98,25 @@ public sealed class SeismicMap : Control
         InvalidateVisual();
     }
 
+    public void UpdateStations(StationNetworkState stations)
+    {
+        var directoryChanged = !ReferenceEquals(_stations.Directory, stations.Directory);
+        _stations = stations;
+        if (_stationPointer is { } pointer) UpdateStationTooltip(pointer);
+        if (directoryChanged && (_stationOverview || _snapshot is null)) RefreshTiles();
+        InvalidateVisual();
+    }
+
+    public void FitStations() { _stationOverview = true; _zoomOffset = 0; _panX = 0; _panY = 0; RefreshTiles(); InvalidateVisual(); }
+
     public void ZoomBy(int step) { _zoomOffset = Math.Clamp(_zoomOffset + step, -5, 10); RefreshTiles(); InvalidateVisual(); }
-    public void Fit() { _zoomOffset = 0; _panX = 0; _panY = 0; RefreshTiles(); InvalidateVisual(); }
+    public void Fit() { _stationOverview = false; _zoomOffset = 0; _panX = 0; _panY = 0; RefreshTiles(); InvalidateVisual(); }
 
     public override void Render(DrawingContext context)
     {
         base.Render(context);
-        if (_snapshot is not { } snapshot || Bounds.Width <= 0 || Bounds.Height <= 0) return;
-        var report = snapshot.Report;
+        if (Bounds.Width <= 0 || Bounds.Height <= 0) return;
+        var snapshot = _snapshot;
         var view = View(snapshot);
         Point Project(double lon, double lat)
         {
@@ -150,27 +167,32 @@ public sealed class SeismicMap : Control
         }
         if (loaded > 0) context.DrawRectangle(Brush.Parse("#16090C12"), null, new Rect(Bounds.Size));
         else DrawNames(context, view.Zoom, Project);
-        var origin = Project(report.Longitude, report.Latitude);
-        var user = Project(snapshot.UserLongitude, snapshot.UserLatitude);
-        var elapsed = Math.Max(0, (DateTimeOffset.UtcNow - report.OriginTime).TotalSeconds);
-        var forecast = snapshot.ModelSupported && snapshot.Event.Confirmed;
-        // Constant-velocity rings illustrate propagation only. The arrival timer uses the travel-time model.
-        var kmPerPixel = 40075.017 * Math.Max(0.087, Math.Cos(report.Latitude * Math.PI / 180)) / view.WorldSize;
-        var pRadius = elapsed * 6 / kmPerPixel;
-        var sRadius = elapsed * 3.5 / kmPerPixel;
-        if (forecast)
+        var forecast = snapshot is { ModelSupported: true } && snapshot.Event.Confirmed;
+        if (snapshot is not null)
         {
-            context.DrawEllipse(Brush.Parse("#1736C9DF"), new Pen(Brush.Parse("#53D3E8"), 1.5), origin, pRadius, pRadius);
-            context.DrawEllipse(Brush.Parse("#28E63E54"), new Pen(Brush.Parse("#FF6B79"), 2), origin, sRadius, sRadius);
+            var report = snapshot.Report;
+            var origin = Project(report.Longitude, report.Latitude);
+            var user = Project(snapshot.UserLongitude, snapshot.UserLatitude);
+            var elapsed = Math.Max(0, (DateTimeOffset.UtcNow - report.OriginTime).TotalSeconds);
+            // Constant-velocity rings illustrate propagation only. The arrival timer uses the travel-time model.
+            var kmPerPixel = 40075.017 * Math.Max(0.087, Math.Cos(report.Latitude * Math.PI / 180)) / view.WorldSize;
+            var pRadius = elapsed * 6 / kmPerPixel;
+            var sRadius = elapsed * 3.5 / kmPerPixel;
+            if (forecast)
+            {
+                context.DrawEllipse(Brush.Parse("#1736C9DF"), new Pen(Brush.Parse("#53D3E8"), 1.5), origin, pRadius, pRadius);
+                context.DrawEllipse(Brush.Parse("#28E63E54"), new Pen(Brush.Parse("#FF6B79"), 2), origin, sRadius, sRadius);
+            }
+            context.DrawLine(new Pen(Brush.Parse("#D2DCEB"), 1, dashStyle: DashStyle.Dash), origin, user);
+            context.DrawEllipse(Brush.Parse(forecast ? "#FF485A" : "#A4B3CB"), new Pen(Brushes.White, 2), origin, 7, 7);
+            context.DrawEllipse(Brush.Parse("#7CE9F5"), new Pen(Brushes.White, 2), user, 6, 6);
+            MarkerLabel(context, forecast ? "震中" : "待核验震中", origin + new Vector(12, -26), "#FFFFFF");
+            MarkerLabel(context, "本地", user + new Vector(12, 8), "#C3FAFF");
         }
-        context.DrawLine(new Pen(Brush.Parse("#D2DCEB"), 1, dashStyle: DashStyle.Dash), origin, user);
-        context.DrawEllipse(Brush.Parse(forecast ? "#FF485A" : "#A4B3CB"), new Pen(Brushes.White, 2), origin, 7, 7);
-        context.DrawEllipse(Brush.Parse("#7CE9F5"), new Pen(Brushes.White, 2), user, 6, 6);
-        MarkerLabel(context, forecast ? "震中" : "待核验震中", origin + new Vector(12, -26), "#FFFFFF");
-        MarkerLabel(context, "本地", user + new Vector(12, 8), "#C3FAFF");
+        DrawStations(context, Project);
         var mode = loaded > 0 ? $"在线 Z{view.Zoom} · {_attribution}"
             : $"离线 Z{view.Zoom} · Natural Earth" + (_online ? (_mapError is null ? " · 加载中" : " · 在线地图不可用") : "");
-        var legend = $"{(forecast ? "P / S 波：传播示意，非实测" : "预测暂停 · 仅显示参考位置")}  ·  {mode}";
+        var legend = $"{(snapshot is null ? "方形：TREM 台站 · 灰色：无有效震度" : forecast ? "P / S 波：传播示意，非实测" : "预测暂停 · 仅显示参考位置")}  ·  {mode}";
         if (_legend != legend)
         {
             _legend = legend;
@@ -178,10 +200,14 @@ public sealed class SeismicMap : Control
         }
     }
 
-    private MapView View(AlertSnapshot snapshot)
+    private MapView View(AlertSnapshot? snapshot)
     {
-        var quake = World(snapshot.Report.Longitude, snapshot.Report.Latitude);
-        var user = World(snapshot.UserLongitude, snapshot.UserLatitude);
+        var stationView = _stationOverview || snapshot is null;
+        var active = stationView ? _stations.Directory.Where(station => station.Active).ToArray() : [];
+        var quake = stationView ? World(active.Length > 0 ? active.Min(station => station.Longitude) : 119.7,
+            active.Length > 0 ? active.Min(station => station.Latitude) : 21.7) : World(snapshot!.Report.Longitude, snapshot.Report.Latitude);
+        var user = stationView ? World(active.Length > 0 ? active.Max(station => station.Longitude) : 122.1,
+            active.Length > 0 ? active.Max(station => station.Latitude) : 25.5) : World(snapshot!.UserLongitude, snapshot.UserLatitude);
         var dx = (user.X - quake.X + 1.5) % 1 - 0.5;
         var scaleX = Math.Max(100, Bounds.Width - 120) / (256 * Math.Max(0.0003, Math.Abs(dx)));
         var scaleY = Math.Max(80, Bounds.Height - 140) / (256 * Math.Max(0.0003, Math.Abs(user.Y - quake.Y)));
@@ -213,7 +239,7 @@ public sealed class SeismicMap : Control
 
     private void RefreshTiles()
     {
-        if (!_online || _loader is null || _snapshot is null || Bounds.Width <= 0 || Bounds.Height <= 0) return;
+        if (!_online || _loader is null || Bounds.Width <= 0 || Bounds.Height <= 0) return;
         var tiles = VisibleTiles(View(_snapshot)).ToArray();
         var key = _template + string.Join(",", tiles.Select(tile => tile.Key));
         if (key == _tileKey && (_mapError is null || DateTimeOffset.UtcNow < _retryAfter)) return;
@@ -230,6 +256,38 @@ public sealed class SeismicMap : Control
             var visible = tiles.Select(tile => tile.Key).ToHashSet();
             foreach (var old in _tiles.Keys.Where(item => !visible.Contains(item)).ToArray()) { _tiles[old].Dispose(); _tiles.Remove(old); }
         }
+    }
+
+    private void DrawStations(DrawingContext context, Func<double, double, Point> project)
+    {
+        _stationHits.Clear();
+        if (!_stations.Enabled) return;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var station in _stations.Directory.Where(station => station.Active))
+        {
+            var point = project(station.Longitude, station.Latitude);
+            if (point.X < 5 || point.Y < 5 || point.X > Bounds.Width - 5 || point.Y > Bounds.Height - 5) continue;
+            var reading = _stations.CurrentReading(station.Id, now);
+            var color = Brush.Parse(StationPalette.Color(reading));
+            context.DrawRectangle(color, new Pen(Brush.Parse("#090C12"), 1.5), new Rect(point.X - 4, point.Y - 4, 8, 8));
+            if (reading is { Triggered: true, Intensity: not null }) context.DrawEllipse(null, new Pen(color, 1.5), point, 8, 8);
+            _stationHits.Add((point, station, reading));
+        }
+    }
+
+    private void UpdateStationTooltip(Point pointer)
+    {
+        double Distance(Point point) => Math.Pow(point.X - pointer.X, 2) + Math.Pow(point.Y - pointer.Y, 2);
+        var hit = _stationHits.Where(item => Distance(item.Position) <= 100)
+            .OrderBy(item => Distance(item.Position)).FirstOrDefault();
+        var reading = hit.Station is null ? null : _stations.CurrentReading(hit.Station.Id, DateTimeOffset.UtcNow);
+        var key = !_stations.Enabled || hit.Station is null ? null : $"TREM 台站 {hit.Station.Id} · {hit.Station.Floor} 层\n"
+            + $"观测震度 {reading?.IntensityLabel ?? "—"} · PGA {reading?.PgaLabel ?? "—"} gal\n"
+            + (_stations.IsFresh(DateTimeOffset.UtcNow) && reading is not null ? $"观测 {_stations.Frame!.Time.ToOffset(TimeSpan.FromHours(8)):HH:mm:ss.fff}" : "目前无有效观测")
+            + "\n原始震度标度，非中国本地预估烈度；仅辅助展示";
+        if (_hoveredStation == key) return;
+        _hoveredStation = key;
+        ToolTip.SetTip(this, key);
     }
 
     private async Task LoadTileAsync(OnlineMapTiles loader, MapTile tile, CancellationToken token)

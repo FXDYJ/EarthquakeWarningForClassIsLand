@@ -3,6 +3,8 @@ using EarthquakeWarning.Services.Feeds;
 using EarthquakeWarning.Calculators;
 using System.Text.Json;
 
+if (args.Contains("--stations-live")) { await StationChecks.LiveAsync(); return; }
+
 var now = DateTimeOffset.UtcNow;
 var first = new SeismicReport("cenc_eew", "Wolfx", "中国地震台网", "event-a", 1, now.AddSeconds(-5), now,
     35, 118, 5.8, 10, "山东测试震中");
@@ -200,6 +202,7 @@ var cases = new (string Name, Action Test)[]
 };
 foreach (var test in cases) { test.Test(); Console.WriteLine($"PASS {test.Name}"); }
 Console.WriteLine($"{cases.Length} regression checks passed.");
+await StationChecks.RunAsync();
 ConsensusEngine Build(params SeismicReport[] reports) { var e = new ConsensusEngine(); e.AddBatch(reports, now); return e; }
 VerifiedEarthquake One(ConsensusEngine e) => e.GetEvents(now, "combined").Single();
 void Check(bool condition) { if (!condition) throw new Exception("Regression check failed"); }

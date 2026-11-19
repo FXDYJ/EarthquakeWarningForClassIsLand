@@ -12,19 +12,25 @@ public partial class EarthquakeAlertWindow : Window
     private readonly Func<AlertSnapshot?> _current;
     private readonly Action _mute;
     private readonly EarthquakeNotificationSettings _settings;
+    private readonly Func<StationNetworkState> _stations;
+    private readonly Action? _openStations;
     public AlertViewModel Model { get; } = new();
     public bool Muted { get; private set; }
 
     public EarthquakeAlertWindow() : this(() => null, () => { }) { }
 
-    public EarthquakeAlertWindow(Func<AlertSnapshot?> current, Action mute, EarthquakeNotificationSettings? settings = null)
+    public EarthquakeAlertWindow(Func<AlertSnapshot?> current, Action mute, EarthquakeNotificationSettings? settings = null,
+        Func<StationNetworkState>? stations = null, Action? openStations = null)
     {
         _current = current;
         _mute = mute;
         _settings = settings ?? new();
+        _stations = stations ?? (() => StationNetworkState.Disabled);
+        _openStations = openStations;
         InitializeComponent();
         WaveMap.LegendChanged += text => MapLegend.Text = text;
         DataContext = Model;
+        StationButton.IsVisible = openStations is not null;
         SizeChanged += (_, _) => FitCanvas();
         _timer.Tick += (_, _) => Refresh();
         Opened += (_, _) => { FitCanvas(); Refresh(); _timer.Start(); };
@@ -63,6 +69,12 @@ public partial class EarthquakeAlertWindow : Window
         Model.Update(snapshot);
         WaveMap.Configure(_settings);
         WaveMap.Update(snapshot);
+        var stations = _stations();
+        // A simulated earthquake must not make unrelated live station observations look like evidence.
+        if (snapshot.Drill && !stations.Simulated) stations = StationNetworkState.Disabled;
+        WaveMap.UpdateStations(stations);
+        StationLegend.IsVisible = stations.Enabled;
+        StationLegend.Text = $"TREM · {stations.Summary(DateTimeOffset.UtcNow)}\n{StationNetworkState.Attribution}";
     }
 
     private void MuteClick(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
@@ -76,4 +88,5 @@ public partial class EarthquakeAlertWindow : Window
     private void ZoomIn(object? sender, Avalonia.Interactivity.RoutedEventArgs args) => WaveMap.ZoomBy(1);
     private void ZoomOut(object? sender, Avalonia.Interactivity.RoutedEventArgs args) => WaveMap.ZoomBy(-1);
     private void FitMap(object? sender, Avalonia.Interactivity.RoutedEventArgs args) => WaveMap.Fit();
+    private void OpenStations(object? sender, Avalonia.Interactivity.RoutedEventArgs args) => _openStations?.Invoke();
 }

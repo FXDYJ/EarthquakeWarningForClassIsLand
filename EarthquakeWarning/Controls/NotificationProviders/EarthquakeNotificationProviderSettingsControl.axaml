@@ -121,6 +121,15 @@
                 </ui:SettingsExpanderItem>
             </ui:SettingsExpander>
 
+            <ui:SettingsExpander Header="台站观测（TREM）" IconSource="Cloud" Description="台湾地区实时震动指标；独立展示，不参与预警触发">
+                <ui:SettingsExpanderItem Content="启用台站观测" Description="随监测总开关暂停；需要联网">
+                    <ui:SettingsExpanderItem.Footer><ToggleSwitch IsChecked="{Binding Settings.EnableStationMonitoring}" AutomationProperties.AutomationId="EnableStationMonitoring"/></ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+                <TextBlock Text="{Binding Settings.StationStatus}" TextWrapping="Wrap" Margin="12"/>
+                <Button Content="查看台站地图与观测值" Click="OpenStations" Margin="12,0,12,12" AutomationProperties.AutomationId="OpenStationMonitor"/>
+                <TextBlock Text="数据：ExpTech Studio TREM · 非商业用途 · 非官方信息，以中央气象署发布为准。观测震度非中国本地预估烈度，不提供原始波形。" TextWrapping="Wrap" Margin="12"/>
+            </ui:SettingsExpander>
+
             <ui:SettingsExpander Header="地震信息与倒计时语音"
                                  Margin="0"
                                  IconSource="Volume"

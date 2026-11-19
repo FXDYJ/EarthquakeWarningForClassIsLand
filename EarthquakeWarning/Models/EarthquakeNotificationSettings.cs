@@ -14,6 +14,10 @@ public partial class EarthquakeNotificationSettings : ObservableRecipient
     [ObservableProperty]
     private bool _enableOnlineMap = true;
     [ObservableProperty]
+    private bool _enableStationMonitoring = true;
+    [ObservableProperty]
+    private string _stationStatus = "等待台站观测";
+    [ObservableProperty]
     private string _mapTileTemplate = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
     [ObservableProperty]
     private string _mapAttribution = "© OpenStreetMap contributors";
